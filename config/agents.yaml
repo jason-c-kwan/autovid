@@ -1,0 +1,14 @@
+planner:
+  model: gemini-2.5-flash-preview-04-17
+  human_input_mode: ALWAYS  # safe while iterating
+  max_turns: 20
+
+tts_agent:
+  model: gemini-2.5-flash-preview-04-17
+  tools:
+    - bash  # to call ai-voice-cloning CLI
+    - python
+  final_check: "TASK_COMPLETE"
+  workspace: workspace/02_tts
+
+# ...repeat for qc_agent, rvc_agent, etc.

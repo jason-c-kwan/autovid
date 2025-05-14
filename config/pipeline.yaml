@@ -1,0 +1,5 @@
+pptx_path:      data
+keynote_video:  data
+tts_model_dir:  /models/voice/ar_model
+rvc_model:      /models/voice/rvc_model.pth
+

@@ -1,0 +1,9 @@
+.env
+
+# Ignore contents of workspace directory but keep the directory
+workspace/*
+!workspace/.gitkeep
+
+# Ignore contents of data directory but keep the directory
+data/*
+!data/.gitkeep

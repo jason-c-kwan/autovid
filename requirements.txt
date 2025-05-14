@@ -1,0 +1,4 @@
+autogen-agentchat
+autogen-ext[gemini]
+python-pptx==0.6.23
+pytest
