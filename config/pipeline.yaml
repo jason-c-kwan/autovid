@@ -1,5 +1,26 @@
-pptx_path:      data
-keynote_video:  data
-tts_model_dir:  /models/voice/ar_model
-rvc_model:      /models/voice/rvc_model.pth
+# --- Paths -------------------------------------------------
+data_dir:        data
+video_dir:       data
+workspace_root:  workspace
+
+# --- Models & hardware ------------------------------------
+tts_model_dir:   /models/ar_tortoise
+rvc_model_path:  /models/rvc/voice_final.pth
+gpu_index:       0
+chunk_seconds:   20            # how the TTS splitter will chunk text
+
+# --- Pronunciation & QC -----------------------------------
+pronun_csv:      config/pronunciations.csv
+qc_threshold:    0.85          # cosine similarity score to accept a chunk
+
+# --- Pipeline steps ---------------------------------------
+steps:
+  - id: check_datasets        # calls tasks.check_datasets()
+  - id: extract_transcript    # calls tasks.extract_transcript()
+  - id: tts_run
+  - id: qc_pronounce
+  - id: apply_rvc
+  - id: splice_audio
+  - id: sync_video
+  - id: make_srt
 

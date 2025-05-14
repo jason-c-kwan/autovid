@@ -39,12 +39,41 @@ def extract_transcript(pptx_file, cue_token="transition", step_id="extract_trans
 
             for j, segment_text in enumerate(segments):
                 segment_text = segment_text.strip()
+                segment_data = {"kind": "text"}
+                
+                # Detect and handle leading/trailing ellipses
+                leading_ellipse = False
+                trailing_ellipse = False
+
+                if segment_text.startswith("..."):
+                    leading_ellipse = True
+                    segment_text = segment_text[3:].lstrip()
+                elif segment_text.startswith("…"):
+                    leading_ellipse = True
+                    segment_text = segment_text[1:].lstrip()
+
+                if segment_text.endswith("..."):
+                    trailing_ellipse = True
+                    segment_text = segment_text[:-3].rstrip()
+                elif segment_text.endswith("…"):
+                    trailing_ellipse = True
+                    segment_text = segment_text[:-1].rstrip()
+
+                segment_data["text"] = segment_text
+
+                if leading_ellipse and trailing_ellipse:
+                    segment_data["continue"] = ["start", "end"]
+                elif leading_ellipse:
+                    segment_data["continue"] = "start"
+                elif trailing_ellipse:
+                    segment_data["continue"] = "end"
+
                 if j < len(segments) - 1:
-                    slide_data["segments"].append({"kind": "text", "text": segment_text})
+                    slide_data["segments"].append(segment_data)
                     slide_data["segments"].append({"kind": "cue", "cue": cue_token})
                 else:
                     if segment_text:
-                        slide_data["segments"].append({"kind": "text", "text": segment_text})
+                        slide_data["segments"].append(segment_data)
 
             manifest["slides"].append(slide_data)
 
