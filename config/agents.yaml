@@ -1,14 +1,15 @@
 planner:
-  model: gemini-2.5-flash-preview-04-17
-  human_input_mode: ALWAYS  # safe while iterating
-  max_turns: 20
+  class_path: autogen_agentchat.agents.AssistantAgent
+  llm_config:
+    config_list_filter: { label: gemini }   # pulls key from .env
+    temperature: 0.2
+  human_input_mode: ALWAYS
 
-tts_agent:
-  model: gemini-2.5-flash-preview-04-17
+runner:
+  class_path: autogen_agentchat.agents.UserProxyAgent
   tools:
-    - bash  # to call ai-voice-cloning CLI
-    - python
-  final_check: "TASK_COMPLETE"
-  workspace: workspace/02_tts
+    - python     # runs wrappers from tasks.py
+    - bash       # fallback for CLI scripts
+  work_dir: "{workspace_root}"   # conductor formats this
+  human_input_mode: NEVER
 
-# ...repeat for qc_agent, rvc_agent, etc.
