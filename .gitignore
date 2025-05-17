@@ -7,3 +7,17 @@ workspace/*
 # Ignore contents of data directory but keep the directory
 data/*
 !data/.gitkeep
+
+# Ignore contents of out directory but keep the directory
+out/*
+!out/.gitkeep
+
+# Ignore directory
+test_workspace/
+config_workspace/
+
+# Ignore pycaches
+autogen/__pycache__/
+cli/__pycache__/
+tests/__pycache__/
+*.pyc
