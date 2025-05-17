@@ -1,5 +1,5 @@
 autogen-agentchat
-autogen-ext[gemini]
+autogen-ext[semantic-kernel-google]
 python-pptx==0.6.23
 pytest
 pyyaml

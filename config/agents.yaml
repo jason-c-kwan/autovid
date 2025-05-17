@@ -1,15 +1,28 @@
 planner:
   class_path: autogen_agentchat.agents.AssistantAgent
-  llm_config:
-    config_list_filter: { label: gemini }   # pulls key from .env
-    temperature: 0.2
+  # === Replace llm_config with a model_client definition ===
+  model_client:
+    class_path: autogen_ext.models.semantic_kernel.SKChatCompletionAdapter
+    # Wrap Google Gemini via Semantic Kernel
+    init_args:
+      sk_client:
+        class_path: semantic_kernel.connectors.ai.google.ChatCompletion
+        init_args:
+          ai_model_id: "${GEMINI_MODEL:-gemini-2.5-flash-preview-04-17}"
+          api_key: "${GOOGLE_API_KEY}"
+      kernel:
+        class_path: semantic_kernel.Kernel
+        init_args: {}                     # uses default NullMemory if none provided
+      prompt_settings:
+        class_path: semantic_kernel.prompt_execution.PromptExecutionSettings
+        init_args:
+          temperature: 0.2
   human_input_mode: ALWAYS
 
 runner:
   class_path: autogen_agentchat.agents.UserProxyAgent
   tools:
-    - python     # runs wrappers from tasks.py
-    - bash       # fallback for CLI scripts
-  work_dir: "{workspace_root}"   # conductor formats this
+    - python
+    - bash
+  work_dir: "{workspace_root}"
   human_input_mode: NEVER
-
