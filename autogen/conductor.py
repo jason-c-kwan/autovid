@@ -120,26 +120,53 @@ def main():
 
         try:
             if step_id == "check_datasets":
+                # Define manifest path for check_datasets
+                check_datasets_manifest_dir = os.path.join(workspace_root, "00_check_datasets")
+                os.makedirs(check_datasets_manifest_dir, exist_ok=True)
+                check_datasets_manifest_filename = "pairs_manifest.json"
+                check_datasets_manifest_path = os.path.join(check_datasets_manifest_dir, check_datasets_manifest_filename)
+
                 # Call check_datasets and get the list of stems
-                stems_result = core.wrappers.check_datasets(data_dir)
-                if isinstance(stems_result, list):
-                    stems = stems_result
-                    logging.info(f"Found {len(stems)} datasets: {stems}")
-                else:
-                    logging.warning(f"check_datasets did not return a list. Result: {stems_result}")
-                    stems = [] # Ensure stems is a list to avoid errors in the next step
+                json_string_result = core.wrappers.check_datasets(data_dir, check_datasets_manifest_path)
+                stems = [] # Initialize stems as an empty list
+                try:
+                    result_data = json.loads(json_string_result)
+                    if isinstance(result_data, dict) and "pairs" in result_data and isinstance(result_data["pairs"], list):
+                        stems = [pair["stem"] for pair in result_data["pairs"] if "stem" in pair]
+                        logging.info(f"Found {len(stems)} datasets: {stems}")
+                        if not stems:
+                            logging.warning("No stems extracted from check_datasets result.")
+                    else:
+                        logging.error(f"check_datasets result is not in the expected format (dict with a 'pairs' list). Result: {result_data}")
+                except json.JSONDecodeError:
+                    logging.error(f"Failed to parse JSON from check_datasets: {json_string_result}")
 
             elif step_id == "extract_transcript":
                 if 'stems' in locals() and stems: # Ensure stems were obtained from check_datasets
                     for stem in stems:
                         pptx_path = os.path.join(data_dir, f"{stem}.pptx")
                         logging.info(f"Extracting transcript for {pptx_path}")
+                        
+                        # Define manifest path for extract_transcript
+                        transcript_manifest_dir = os.path.join(workspace_root, "01_transcripts")
+                        os.makedirs(transcript_manifest_dir, exist_ok=True)
+                        transcript_manifest_filename = f"{stem}_transcript_manifest.json"
+                        transcript_manifest_path = os.path.join(transcript_manifest_dir, transcript_manifest_filename)
+                        
                         try:
                             # Call extract_transcript for each stem
-                            transcript_result = core.wrappers.extract_transcript(pptx_path, workspace_root)
-                            logging.info(f"Transcript extraction for {stem} completed.")
-                            # Process transcript_result if needed
-                            # planner.receive({"step": step_id, "stem": stem, "result": transcript_result})
+                            transcript_json_string = core.wrappers.extract_transcript(pptx_path, transcript_manifest_path)
+                            logging.info(f"Transcript extraction for {stem} completed (manifest: {transcript_manifest_path}).")
+                            # Optionally, parse transcript_json_string and log details or check status
+                            try:
+                                transcript_data = json.loads(transcript_json_string)
+                                if transcript_data.get("status") == "success":
+                                    logging.info(f"Transcript extraction for {stem} reported success.")
+                                else:
+                                    logging.warning(f"Transcript extraction for {stem} reported status: {transcript_data.get('status')}. Error: {transcript_data.get('error')}")
+                            except json.JSONDecodeError:
+                                logging.error(f"Failed to parse JSON from extract_transcript for {stem}: {transcript_json_string}")
+                            # planner.receive({"step": step_id, "stem": stem, "result": transcript_data})
                         except RuntimeError as e:
                             logging.error(f"RuntimeError extracting transcript for {stem}: {e}", exc_info=True)
                         except Exception as e:
