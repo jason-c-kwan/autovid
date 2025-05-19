@@ -1,6 +1,7 @@
 # --- Paths -------------------------------------------------
 data_dir:        data
 video_dir:       data
+model_dir:       models
 workspace_root:  workspace
 
 # --- Models & hardware ------------------------------------
@@ -18,6 +19,12 @@ steps:
   - id: check_datasets        # calls tasks.check_datasets()
   - id: extract_transcript    # calls tasks.extract_transcript()
   - id: tts_run
+    parameters:
+      engine:                 piper
+      piper_model:            en_GB-northern_english_male-medium
+      orpheus_model:          canopylabs/orpheus-tts-0.1-finetune-prod
+      orpheus_voice:          dan
+      orpheus_temperature:    0.2
   - id: qc_pronounce
   - id: apply_rvc
   - id: splice_audio

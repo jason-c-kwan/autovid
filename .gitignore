@@ -12,6 +12,10 @@ data/*
 out/*
 !out/.gitkeep
 
+# Ignore contents of out directory but keep the directory
+models/*
+!models/.gitkeep
+
 # Ignore directory
 test_workspace/
 config_workspace/
