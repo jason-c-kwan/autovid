@@ -143,6 +143,7 @@ def main():
 
             elif step_id == "extract_transcript":
                 if 'stems' in locals() and stems: # Ensure stems were obtained from check_datasets
+                    all_transcripts = []
                     for stem in stems:
                         pptx_path = os.path.join(data_dir, f"{stem}.pptx")
                         logging.info(f"Extracting transcript for {pptx_path}")
@@ -160,6 +161,7 @@ def main():
                             # Optionally, parse transcript_json_string and log details or check status
                             try:
                                 transcript_data = json.loads(transcript_json_string)
+                                all_transcripts.append(transcript_data)
                                 if transcript_data.get("status") == "success":
                                     logging.info(f"Transcript extraction for {stem} reported success.")
                                 else:
