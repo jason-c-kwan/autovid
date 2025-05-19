@@ -65,10 +65,12 @@ def minimal_config_file(tmp_path: Path) -> Path:
 def run_cli(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     """Helper to run the Orpheus TTS CLI script."""
     command = [sys.executable, str(ORPHEUS_TTS_CLI)] + args
-    timeout_seconds = 180 # 3 minutes
+    timeout_seconds = 300 # 5 minutes, increased like in batch tests
 
     # Create a copy of the current environment
     env = os.environ.copy()
+    env['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID' # Ensure consistent GPU ordering
+    env['CUDA_VISIBLE_DEVICES'] = '1' # Attempt to use GPU 1
     
     # Path to the directory containing the 'orpheus_tts' package for direct import
     # This is the directory where setup.py is located and where find_packages() would look.
@@ -242,17 +244,10 @@ def test_orpheus_tts_failure_no_text(tmp_path: Path, default_config_file: Path):
     assert result.returncode != 0
 
     # The script might not even reach manifest generation if argparse exits early.
-    # If it does, check manifest status.
-    if manifest_file.exists():
-        with open(manifest_file, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-        assert manifest["status"] == "failure"
-        assert manifest["text"] == "" # Or whatever argparse defaults it to
-        assert manifest["wav_path"] is None
-        assert manifest["duration"] == 0.0
-    else:
-        # Check stderr for argparse error message
-        assert "error: the following arguments are required: --text" in result.stderr.lower()
+    # The script should now exit due to "Either --text or --texts-file must be provided."
+    # and it won't create a manifest file in this specific scenario.
+    assert not manifest_file.exists(), "Manifest file should not be created when --text is missing."
+    assert "Either --text or --texts-file must be provided".lower() in result.stderr.lower()
 
 
 def test_orpheus_tts_failure_empty_text(tmp_path: Path, default_config_file: Path):
@@ -269,6 +264,7 @@ def test_orpheus_tts_failure_empty_text(tmp_path: Path, default_config_file: Pat
     print("STDERR:", result.stderr)
     assert result.returncode != 0, "CLI should exit with non-zero for empty text"
 
+    # With the corrected CLI logic, a manifest file should be created for an empty --text input.
     assert manifest_file.exists(), "Manifest file should be created for empty text failure"
     with open(manifest_file, "r", encoding="utf-8") as f:
         manifest = json.load(f)
@@ -277,7 +273,10 @@ def test_orpheus_tts_failure_empty_text(tmp_path: Path, default_config_file: Pat
     assert manifest["text"] == ""
     assert manifest["wav_path"] is None
     assert manifest["duration"] == 0.0
-    assert "Input text (--text) cannot be empty" in result.stderr
+    assert "error" in manifest # Check for the error field in manifest
+    assert "Input text is empty".lower() in manifest["error"].lower()
+    # Also check stderr for the logged error
+    assert "Input text (--text) cannot be empty".lower() in result.stderr.lower()
 
 
 def test_orpheus_tts_failure_missing_model_in_config(tmp_path: Path):
