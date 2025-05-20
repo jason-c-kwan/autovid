@@ -71,7 +71,7 @@ class TestConductor(unittest.TestCase):
                 'workspace_root': 'config_workspace', # Moved out of 'globals'
                 'steps': [
                     {'id': 'check_datasets'},
-                    {'id': 'extract_transcript'}
+                    {'id': 'extract_transcript', 'parameters': {'cue': '[test_cue_from_yaml]'}}
                 ]
             }
         ]
@@ -128,8 +128,17 @@ class TestConductor(unittest.TestCase):
         expected_alpha_transcript_path = os.path.join('config_workspace', '01_transcripts', 'alpha_transcript_manifest.json')
         expected_beta_transcript_path = os.path.join('config_workspace', '01_transcripts', 'beta_transcript_manifest.json')
 
-        mock_extract_transcript.assert_any_call(os.path.join('config_data', 'alpha.pptx'), expected_alpha_transcript_path)
-        mock_extract_transcript.assert_any_call(os.path.join('config_data', 'beta.pptx'), expected_beta_transcript_path)
+        # Verify that extract_transcript was called with the cue_token from YAML
+        mock_extract_transcript.assert_any_call(
+            os.path.join('config_data', 'alpha.pptx'),
+            expected_alpha_transcript_path,
+            cue_token='[test_cue_from_yaml]'
+        )
+        mock_extract_transcript.assert_any_call(
+            os.path.join('config_data', 'beta.pptx'),
+            expected_beta_transcript_path,
+            cue_token='[test_cue_from_yaml]'
+        )
 
         # Verify os.makedirs calls
         mock_os_makedirs.assert_any_call(os.path.join('config_workspace', '00_check_datasets'), exist_ok=True)
@@ -196,7 +205,7 @@ class TestConductor(unittest.TestCase):
                 'workspace_root': 'test_workspace', # Define at root
                 'steps': [
                     {'id': 'check_datasets'},
-                    {'id': 'extract_transcript'}
+                    {'id': 'extract_transcript', 'parameters': {'cue': '[test_error_cue]'}}
                 ]
             }
         ]
@@ -212,7 +221,8 @@ class TestConductor(unittest.TestCase):
         # Configure mocks for core.wrappers
         mock_check_datasets.return_value = json.dumps({"pairs": [{"stem": "alpha"}, {"stem": "beta"}]})
 
-        def extract_transcript_side_effect(pptx_path, output_path):
+        # The mocked core.wrappers.extract_transcript will be called with pptx_path, output_path, and cue_token
+        def extract_transcript_side_effect(pptx_path, output_path, cue_token):
             if 'beta.pptx' in pptx_path:
                 raise RuntimeError("Simulated extraction error")
             return json.dumps({"status": "success"})
@@ -238,8 +248,17 @@ class TestConductor(unittest.TestCase):
         # beta.pptx path for extract_transcript will also be constructed before the error
         expected_beta_transcript_path = os.path.join('test_workspace', '01_transcripts', 'beta_transcript_manifest.json')
 
-        mock_extract_transcript.assert_any_call(os.path.join('test_data', 'alpha.pptx'), expected_alpha_transcript_path)
-        mock_extract_transcript.assert_any_call(os.path.join('test_data', 'beta.pptx'), expected_beta_transcript_path)
+        mock_extract_transcript.assert_any_call(
+            os.path.join('test_data', 'alpha.pptx'),
+            expected_alpha_transcript_path,
+            cue_token='[test_error_cue]'
+        )
+        # The call that raises an error should also have the cue_token
+        mock_extract_transcript.assert_any_call(
+            os.path.join('test_data', 'beta.pptx'),
+            expected_beta_transcript_path,
+            cue_token='[test_error_cue]'
+        )
 
         # Verify os.makedirs calls
         mock_os_makedirs.assert_any_call(os.path.join('test_workspace', '00_check_datasets'), exist_ok=True)

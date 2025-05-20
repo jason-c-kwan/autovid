@@ -18,6 +18,8 @@ qc_threshold:    0.85          # cosine similarity score to accept a chunk
 steps:
   - id: check_datasets        # calls tasks.check_datasets()
   - id: extract_transcript    # calls tasks.extract_transcript()
+    parameters:
+      cue: "[transition]"
   - id: tts_run
     parameters:
       engine:                 piper
@@ -30,4 +32,3 @@ steps:
   - id: splice_audio
   - id: sync_video
   - id: make_srt
-

@@ -155,9 +155,23 @@ def main():
                         transcript_manifest_path = os.path.join(transcript_manifest_dir, transcript_manifest_filename)
                         
                         try:
+                            # Get parameters for the step
+                            step_params = step.get("parameters", {})
+                            cue_from_yaml = step_params.get("cue") # Will be "[transition]" or None if not set
+
+                            call_kwargs = {}
+                            if cue_from_yaml is not None:
+                                call_kwargs['cue_token'] = cue_from_yaml
+                            # We could also handle step_id override from parameters if needed:
+                            # call_kwargs['step_id'] = step_params.get("step_id", "extract_transcript") # Uses default from wrapper if not in YAML
+
                             # Call extract_transcript for each stem
-                            transcript_json_string = core.wrappers.extract_transcript(pptx_path, transcript_manifest_path)
-                            logging.info(f"Transcript extraction for {stem} completed (manifest: {transcript_manifest_path}).")
+                            transcript_json_string = core.wrappers.extract_transcript(
+                                pptx_path,
+                                transcript_manifest_path,
+                                **call_kwargs # Pass cue_token if specified in YAML, otherwise wrapper default applies
+                            )
+                            logging.info(f"Transcript extraction for {stem} completed (manifest: {transcript_manifest_path}). Cue token used from YAML: {cue_from_yaml if cue_from_yaml is not None else 'wrapper default'}")
                             # Optionally, parse transcript_json_string and log details or check status
                             try:
                                 transcript_data = json.loads(transcript_json_string)

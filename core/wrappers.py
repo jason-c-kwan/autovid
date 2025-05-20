@@ -32,14 +32,14 @@ def check_datasets(data_dir, output_path=None, step_id="check_datasets"):
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error checking datasets: {e.stderr}") from e
 
-def extract_transcript(pptx_path, output_path=None, cue_token="transition", step_id="extract_transcript"):
+def extract_transcript(pptx_path, output_path=None, cue_token="[transition]", step_id="extract_transcript"):
     """
     Calls cli/extract_transcript.py with the specified PPTX file and output path using subprocess.
 
     Args:
         pptx_path (str): The path to the PPTX file.
         output_path (str, optional): Path to output manifest JSON file. Defaults to None.
-        cue_token (str, optional): Token used to split segments. Defaults to "transition".
+        cue_token (str, optional): Token used to split segments. Defaults to "[transition]".
         step_id (str, optional): Identifier for the extraction step. Defaults to "extract_transcript".
 
     Returns:
