@@ -38,6 +38,11 @@ The workflow is as follows:
 *   Scene/slide detection: FFmpeg `select='gt(scene,0.4)'` filter
 *   Voice conversion: Custom fine-tuned RVC model
 
+Install with:
+```bash
+pip install --no-build-isolation --no-deps -r requirements.txt
+```
+
 ## Naming conventions
 
 Input and output files should follow these naming conventions:
