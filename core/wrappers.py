@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 import uuid
+from typing import Union, List, Dict, Any # Moved to top level
 
 def check_datasets(data_dir, output_path=None, step_id="check_datasets"):
     """
@@ -238,6 +239,7 @@ def orpheus_tts(input_json_data: dict, output_path: str = None, step_id: str = "
     import os
     import sys # Ensure sys is imported if not already at the top of the file
     import subprocess # Ensure subprocess is imported
+    # from typing import Union, List, Dict, Any # Removed from here, moved to top
 
     # Step 1: Preprocess the transcript
     # Write input_json_data to a temporary file for transcript_preprocess.py
@@ -403,3 +405,181 @@ def orpheus_tts(input_json_data: dict, output_path: str = None, step_id: str = "
             raise RuntimeError(f"Failed to write aggregated manifest to {output_path}: {e}") from e
             
     return final_aggregated_manifest
+
+
+def whisper_transcribe( # noqa: E501 (line too long)
+    in_data: Union[str, List[str], List[Dict[str, str]]],
+    model: str = "large-v3",
+    batch_size: int = 16,
+    compute_type: str = "float16",
+    device: str = "cuda:0"
+) -> Dict[str, str]:
+    """
+    Transcribes audio files using cli/transcribe_whisperx.py.
+
+    Accepts:
+    - A string path to a JSON manifest file (list of audio paths).
+    - A list of dictionaries, each with a "wav_path" key.
+    - A list of string WAV file paths.
+
+    The paths in the input manifest or lists can be relative or absolute.
+    Relative paths in a manifest file are resolved relative to the manifest's directory.
+    Relative paths in input lists are resolved relative to the current working directory.
+
+    The function calls cli/transcribe_whisperx.py via subprocess, providing it
+    with a temporary manifest containing absolute paths to the audio files.
+    It parses the JSON output from the script (which contains a list of dictionaries,
+    each with "wav" (absolute path) and "asr" (transcription text)) and returns
+    a dictionary mapping absolute WAV file paths to their ASR text.
+
+    Args:
+        in_data: Input data specifying audio files.
+        model: WhisperX model name.
+        batch_size: Batch size for WhisperX inference.
+        compute_type: Compute type for WhisperX.
+        device: Device for WhisperX.
+
+    Returns:
+        A dictionary mapping absolute audio file paths to their transcriptions.
+
+    Raises:
+        FileNotFoundError: If the input manifest file (if `in_data` is a path) is not found.
+        RuntimeError: If the cli/transcribe_whisperx.py script fails or if JSON parsing fails.
+    """
+    import json
+    import tempfile
+    import os
+    import sys
+    import subprocess
+    import pathlib
+
+    audio_file_paths_absolute_set: set[str] = set()
+
+    if isinstance(in_data, str):
+        manifest_path = pathlib.Path(in_data).resolve()
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"Input manifest file not found: {manifest_path}")
+        
+        manifest_dir = manifest_path.parent
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                if manifest_path.suffix.lower() == ".json":
+                    path_list = json.load(f)
+                    if not isinstance(path_list, list):
+                        raise ValueError("JSON manifest must contain a list of paths.")
+                    for p_str in path_list:
+                        p = pathlib.Path(p_str)
+                        abs_p = p if p.is_absolute() else manifest_dir / p
+                        audio_file_paths_absolute_set.add(str(abs_p.resolve()))
+                elif manifest_path.suffix.lower() == ".txt":
+                    for line in f:
+                        p_str = line.strip()
+                        if p_str:
+                            p = pathlib.Path(p_str)
+                            abs_p = p if p.is_absolute() else manifest_dir / p
+                            audio_file_paths_absolute_set.add(str(abs_p.resolve()))
+                else:
+                    raise ValueError(f"Unsupported manifest file type: {manifest_path.suffix}. Must be .json or .txt.")
+        except Exception as e:
+            raise RuntimeError(f"Error reading manifest file {manifest_path}: {e}") from e
+
+    elif isinstance(in_data, list):
+        if not in_data: # Empty list
+            return {}
+        
+        current_working_dir = pathlib.Path.cwd()
+        if isinstance(in_data[0], dict):
+            for item in in_data:
+                if not isinstance(item, dict) or "wav_path" not in item:
+                    raise ValueError("Invalid item in list of dicts: must be a dict with 'wav_path'.")
+                p = pathlib.Path(item["wav_path"])
+                abs_p = p if p.is_absolute() else current_working_dir / p
+                audio_file_paths_absolute_set.add(str(abs_p.resolve()))
+        elif isinstance(in_data[0], str):
+            for path_str in in_data:
+                if not isinstance(path_str, str):
+                     raise ValueError("Invalid item in list of strings: all items must be strings (paths).")
+                p = pathlib.Path(path_str)
+                abs_p = p if p.is_absolute() else current_working_dir / p
+                audio_file_paths_absolute_set.add(str(abs_p.resolve()))
+        else:
+            raise ValueError("Input list must contain either all dicts (with 'wav_path') or all strings (paths).")
+    else:
+        raise TypeError("in_data must be a str (manifest path) or a list (of paths or dicts).")
+
+    audio_file_paths_absolute = sorted(list(audio_file_paths_absolute_set))
+
+    if not audio_file_paths_absolute:
+        return {}
+
+    tmp_manifest_path = None
+    tmp_output_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as tmp_manifest_file:
+            json.dump(audio_file_paths_absolute, tmp_manifest_file)
+            tmp_manifest_path = tmp_manifest_file.name
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as tmp_output_file: # Not opened in text mode, just need name
+            tmp_output_path = tmp_output_file.name
+
+        script_path = str(pathlib.Path(__file__).parent.parent / "cli" / "transcribe_whisperx.py")
+
+        cmd = [
+            sys.executable, script_path,
+            "--in", tmp_manifest_path,
+            "--model", model,
+            "--out", tmp_output_path,
+            "--batch_size", str(batch_size),
+            "--compute_type", compute_type,
+            "--device", device
+        ]
+        
+        process = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding='utf-8')
+
+        if process.returncode != 0:
+            # Check if output file was created and has content, even on error
+            error_output_content = ""
+            if os.path.exists(tmp_output_path):
+                try:
+                    with open(tmp_output_path, 'r', encoding='utf-8') as f_err_out:
+                        error_output_content = f_err_out.read(500) # Read first 500 chars
+                    if error_output_content:
+                         error_output_content = f"\nContent of output file '{tmp_output_path}' (partial):\n{error_output_content}"
+                except Exception:
+                    pass # Ignore if can't read error output file
+
+            raise RuntimeError(
+                f"cli/transcribe_whisperx.py failed with exit code {process.returncode}.\n"
+                f"Command: {' '.join(cmd)}\n"
+                f"Stderr: {process.stderr.strip() if process.stderr else 'N/A'}\n"
+                f"Stdout: {process.stdout.strip() if process.stdout else 'N/A'}"
+                f"{error_output_content}"
+            )
+
+        if not os.path.exists(tmp_output_path) or os.path.getsize(tmp_output_path) == 0:
+             # This case implies the script might have exited 0 but failed to produce the output file.
+            raise RuntimeError(
+                f"cli/transcribe_whisperx.py completed successfully but output file '{tmp_output_path}' is missing or empty.\n"
+                f"Command: {' '.join(cmd)}\n"
+                f"Stderr: {process.stderr.strip() if process.stderr else 'N/A'}\n"
+                f"Stdout: {process.stdout.strip() if process.stdout else 'N/A'}"
+            )
+
+        with open(tmp_output_path, 'r', encoding='utf-8') as f:
+            results_list = json.load(f)
+            
+        # The script cli/transcribe_whisperx.py already outputs absolute paths in the 'wav' field.
+        return {item["wav"]: item["asr"] for item in results_list}
+
+    finally:
+        if tmp_manifest_path and os.path.exists(tmp_manifest_path):
+            try:
+                os.remove(tmp_manifest_path)
+            except OSError as e:
+                print(f"Warning: Could not delete temporary manifest file {tmp_manifest_path}: {e}", file=sys.stderr)
+        if tmp_output_path and os.path.exists(tmp_output_path):
+            try:
+                os.remove(tmp_output_path)
+            except OSError as e:
+                print(f"Warning: Could not delete temporary output file {tmp_output_path}: {e}", file=sys.stderr)
