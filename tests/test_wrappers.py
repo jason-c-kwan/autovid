@@ -3,7 +3,7 @@ import json
 from unittest.mock import Mock, patch
 import subprocess # Added import
 import os # Added import
-from core.wrappers import piper_tts
+from core.wrappers import piper_tts, orpheus_tts # Added orpheus_tts
 
 @pytest.fixture
 def mock_subprocess(): # Removed mocker argument
@@ -167,3 +167,181 @@ def test_piper_tts_invalid_json_from_tts(mock_subprocess, tmp_path):
     
     assert "Invalid TTS output for chunk 0" in str(excinfo.value)
     assert mock_subprocess.call_count == 2
+
+# --- Tests for orpheus_tts ---
+
+@pytest.fixture
+def sample_transcript_json_data():
+    """Provides a sample transcript JSON data for Orpheus tests."""
+    return {
+        "title": "Test Presentation",
+        "slides": [
+            {
+                "index": 0,
+                "title": "Slide 1 Title",
+                "segments": [
+                    {"kind": "text", "text": "Hello world.", "continue": []},
+                    {"kind": "text", "text": "This is the first slide.", "continue": []}
+                ]
+            },
+            {
+                "index": 1,
+                "title": "Slide 2 Title",
+                "segments": [
+                    {"kind": "text", "text": "Second slide content.", "continue": []}
+                ]
+            }
+        ]
+    }
+
+def test_wrapper_orpheus_tts_success(mock_subprocess, tmp_path, sample_transcript_json_data, capsys):
+    """Test successful Orpheus TTS wrapper execution."""
+    output_file = tmp_path / "orpheus_manifest.json"
+
+    # Mock for transcript_preprocess.py
+    mock_preprocessed_data = {
+        "slides": [
+            {"index": 0, "merged_text": "Hello world. This is the first slide.", "tts_texts": ["Hello world. This is the first slide."]},
+            {"index": 1, "merged_text": "Second slide content.", "tts_texts": ["Second slide content."]}
+        ],
+        "preprocessing_applied": {"chunk_mode": "slide"}
+    }
+    preprocess_mock_orpheus = Mock(spec=subprocess.CompletedProcess)
+    preprocess_mock_orpheus.stdout = json.dumps(mock_preprocessed_data)
+    preprocess_mock_orpheus.stderr = ""
+    preprocess_mock_orpheus.returncode = 0
+
+    # Mock for orpheus_tts_cli.py
+    mock_orpheus_cli_output = [
+        {"text": "Hello world. This is the first slide.", "wav_path": "tts_audio_output/orpheus_abc.wav", "status": "success", "duration": 2.5, "pipeline": "orpheus"},
+        {"text": "Second slide content.", "wav_path": "tts_audio_output/orpheus_def.wav", "status": "success", "duration": 1.8, "pipeline": "orpheus"}
+    ]
+    orpheus_cli_mock = Mock(spec=subprocess.CompletedProcess)
+    orpheus_cli_mock.stdout = json.dumps(mock_orpheus_cli_output)
+    orpheus_cli_mock.stderr = ""
+    orpheus_cli_mock.returncode = 0
+    
+    mock_subprocess.side_effect = [preprocess_mock_orpheus, orpheus_cli_mock]
+
+    result = orpheus_tts(
+        input_json_data=sample_transcript_json_data,
+        output_path=str(output_file),
+        step_id="test_orpheus_success", # Default is "tts_run"
+        config_path="config/pipeline.yaml" 
+    )
+
+    assert mock_subprocess.call_count == 2
+
+    # Check transcript_preprocess.py call
+    preprocess_call_args = mock_subprocess.call_args_list[0][0][0]
+    assert 'cli/transcript_preprocess.py' in preprocess_call_args
+    assert '--input_file' in preprocess_call_args 
+    assert '--chunk_mode' in preprocess_call_args
+    assert 'slide' in preprocess_call_args
+
+    # Check orpheus_tts_cli.py call
+    orpheus_cli_call_args = mock_subprocess.call_args_list[1][0][0]
+    assert 'cli/orpheus_tts_cli.py' in orpheus_cli_call_args
+    assert '--texts-file' in orpheus_cli_call_args 
+    assert '--config' in orpheus_cli_call_args
+    assert 'config/pipeline.yaml' in orpheus_cli_call_args
+    assert '--step_id' in orpheus_cli_call_args
+    assert 'test_orpheus_success' in orpheus_cli_call_args
+    
+    assert result["source_transcript_data_preview"]["title"] == "Test Presentation"
+    assert result["preprocessing_details"]["chunk_mode"] == "slide"
+    assert result["number_of_tts_segments_processed"] == 2
+    assert len(result["tts_results"]) == 2
+    assert result["tts_results"][0]["text"] == "Hello world. This is the first slide."
+    assert result["step_id"] == "test_orpheus_success"
+
+    assert output_file.exists()
+    with open(output_file, 'r') as f:
+        content_on_disk = json.load(f)
+    assert content_on_disk["step_id"] == "test_orpheus_success"
+    assert len(content_on_disk["tts_results"]) == 2
+
+
+def test_wrapper_orpheus_tts_cli_error(mock_subprocess, tmp_path, sample_transcript_json_data, capsys):
+    """Test Orpheus TTS wrapper when orpheus_tts_cli.py fails."""
+    mock_preprocessed_data = {
+        "slides": [{"merged_text": "Some text for TTS.", "tts_texts": ["Some text for TTS."]}],
+        "preprocessing_applied": {"chunk_mode": "slide"}
+    }
+    preprocess_mock_orpheus = Mock(spec=subprocess.CompletedProcess)
+    preprocess_mock_orpheus.stdout = json.dumps(mock_preprocessed_data)
+    preprocess_mock_orpheus.stderr = ""
+    preprocess_mock_orpheus.returncode = 0
+
+    orpheus_cli_error = subprocess.CalledProcessError(
+        returncode=1,
+        cmd=['cli/orpheus_tts_cli.py'],
+        stderr="Orpheus CLI simulated error message."
+    )
+    
+    mock_subprocess.side_effect = [preprocess_mock_orpheus, orpheus_cli_error]
+
+    with pytest.raises(RuntimeError) as excinfo:
+        orpheus_tts(
+            input_json_data=sample_transcript_json_data,
+            step_id="test_orpheus_cli_fail" # Default is "tts_run"
+        )
+    
+    assert "Orpheus TTS CLI failed" in str(excinfo.value)
+    assert "Orpheus CLI simulated error message." in str(excinfo.value)
+    assert mock_subprocess.call_count == 2
+
+
+def test_wrapper_orpheus_tts_preprocess_error(mock_subprocess, tmp_path, sample_transcript_json_data, capsys):
+    """Test Orpheus TTS wrapper when transcript_preprocess.py fails."""
+    preprocess_error = subprocess.CalledProcessError(
+        returncode=1,
+        cmd=['cli/transcript_preprocess.py'],
+        stderr="Preprocessor simulated error."
+    )
+    
+    mock_subprocess.side_effect = [preprocess_error]
+
+    with pytest.raises(RuntimeError) as excinfo:
+        orpheus_tts(
+            input_json_data=sample_transcript_json_data,
+            step_id="test_orpheus_preprocess_fail" # Default is "tts_run"
+        )
+    
+    assert "Transcript preprocessing failed" in str(excinfo.value)
+    assert "Preprocessor simulated error." in str(excinfo.value)
+    assert mock_subprocess.call_count == 1
+
+
+def test_wrapper_orpheus_tts_empty_texts_from_preprocess(mock_subprocess, tmp_path, sample_transcript_json_data, capsys):
+    """Test Orpheus TTS wrapper when preprocessing results in no texts (e.g. only whitespace)."""
+    mock_preprocessed_data_empty = {
+        "slides": [
+            {"index": 0, "merged_text": " ", "tts_texts": [" "]}, 
+            {"index": 1, "merged_text": "", "tts_texts": [""]}    
+        ],
+        "preprocessing_applied": {"chunk_mode": "slide"}
+    }
+    preprocess_mock_empty = Mock(spec=subprocess.CompletedProcess)
+    preprocess_mock_empty.stdout = json.dumps(mock_preprocessed_data_empty)
+    preprocess_mock_empty.stderr = ""
+    preprocess_mock_empty.returncode = 0
+
+    # Orpheus CLI with --texts-file and an empty list should return an empty list JSON `[]` and exit 0
+    mock_orpheus_cli_empty_output = [] 
+    orpheus_cli_mock_empty = Mock(spec=subprocess.CompletedProcess)
+    orpheus_cli_mock_empty.stdout = json.dumps(mock_orpheus_cli_empty_output)
+    orpheus_cli_mock_empty.stderr = ""
+    orpheus_cli_mock_empty.returncode = 0 # Orpheus CLI should succeed with empty list
+    
+    mock_subprocess.side_effect = [preprocess_mock_empty, orpheus_cli_mock_empty]
+
+    result = orpheus_tts(
+        input_json_data=sample_transcript_json_data, 
+        step_id="test_orpheus_empty_texts" # Default is "tts_run"
+    )
+
+    assert mock_subprocess.call_count == 2
+    assert result["number_of_tts_segments_processed"] == 0 # Wrapper filters out empty/whitespace strings
+    assert len(result["tts_results"]) == 0 # Orpheus CLI mock returns empty list
+    assert result["step_id"] == "test_orpheus_empty_texts"
