@@ -1,6 +1,6 @@
 # autovid
 
-Uses Autogen to automatically make a video presentation from a PowerPoint presentation (with speaker notes) and the video output from PowerPoint.
+Uses Autogen to automatically make a video presentation from a PowerPoint presentation (with speaker notes) and the video output from Keynote.
 
 ## Workflow
 
@@ -8,7 +8,7 @@ The pipeline converts a speaker-noted PPTX + a 1 s–delayed Keynote video into 
 
 The workflow is as follows:
 
-1.  **User supplies pairs of files** in the `data` directory: PowerPoint `.pptx` containing speaker notes and a `.mov` export from Keynote. The pairs must share the same filename stem, and the Keynote video export must have a fixed 1.0 s delay between slide transitions and animation triggers. Speaker notes use `\[transition]` to mark when an animation within a slide should fire, and ellipses `...` to indicate sentences spanning slide boundaries.
+1.  **User supplies pairs of files** in the `data` directory: PowerPoint `.pptx` containing speaker notes and a `.mov` export from Keynote. The pairs must share the same filename stem, and the Keynote video export must have a fixed 1.0 s delay between slide transitions and animation triggers. Speaker notes use `[transition]` to mark when an animation within a slide should fire, and ellipses `...` to indicate sentences spanning slide boundaries.
 2.  **Dataset validation**: Confirm each `.pptx` has a corresponding `.mov` in `data`, then iterate through each dataset.
 3.  **Note extraction**: Parse each PPTX and attach text (including transition cues and ellipses) to the appropriate slides.
 4.  **TTS chunking**: Split text (e.g., by sentence), joining two-part sentences separated by ellipses. Run TTS either via:
