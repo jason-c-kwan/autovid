@@ -22,7 +22,7 @@ steps:
       cue: "[transition]"
   - id: tts_run
     parameters:
-      engine:                 piper # piper or orpheus
+      engine:                 orpheus # piper or orpheus
       piper_model:            en_GB-northern_english_male-medium
       orpheus_model:          canopylabs/orpheus-tts-0.1-finetune-prod
       orpheus_voice:          dan

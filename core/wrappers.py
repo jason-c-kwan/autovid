@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from pathlib import Path
+import uuid
 
 def check_datasets(data_dir, output_path=None, step_id="check_datasets"):
     """
@@ -283,6 +284,21 @@ def orpheus_tts(input_json_data: dict, output_path: str = None, step_id: str = "
     # Orpheus CLI handles empty list in texts_file gracefully by outputting an empty list manifest.
 
     # Step 3: Pass texts to Orpheus TTS CLI
+    # Determine directory for Orpheus's own manifest and audio files
+    orpheus_cli_output_dir = None
+    orpheus_cli_manifest_path_temp = None # Path for the manifest Orpheus CLI itself will write
+
+    if output_path: # output_path is for the final aggregated manifest from this wrapper
+        agg_manifest_path_obj = Path(output_path)
+        orpheus_cli_output_dir = agg_manifest_path_obj.parent / "orpheus_audio_chunks"
+        try:
+            orpheus_cli_output_dir.mkdir(parents=True, exist_ok=True)
+            # Create a temporary path for Orpheus CLI to write its own manifest
+            # This manifest will contain a list of results for each text processed.
+            orpheus_cli_manifest_path_temp = orpheus_cli_output_dir / f"orpheus_cli_output_{uuid.uuid4().hex}.json"
+        except Exception as e:
+            raise RuntimeError(f"Failed to create directory/path for Orpheus CLI outputs {orpheus_cli_output_dir}: {e}") from e
+
     with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".json") as tmp_texts_file:
         json.dump(texts_for_orpheus, tmp_texts_file)
         tmp_texts_file_path = tmp_texts_file.name
@@ -293,36 +309,80 @@ def orpheus_tts(input_json_data: dict, output_path: str = None, step_id: str = "
             sys.executable, 'cli/orpheus_tts_cli.py',
             '--texts-file', tmp_texts_file_path,
             '--config', config_path,
-            '--step_id', step_id 
+            '--step_id', step_id
         ]
+        if orpheus_cli_manifest_path_temp:
+            orpheus_cmd.extend(['--out', str(orpheus_cli_manifest_path_temp)])
 
         tts_result = subprocess.run(
             orpheus_cmd,
             capture_output=True,
             text=True,
-            check=True 
+            check=True
         )
-        orpheus_output_manifest_list = json.loads(tts_result.stdout)
+
+        # If orpheus_cli_manifest_path_temp was used, read from that file.
+        # Otherwise, cli/orpheus_tts_cli.py prints its JSON to stdout.
+        if orpheus_cli_manifest_path_temp:
+            if orpheus_cli_manifest_path_temp.is_file():
+                with open(orpheus_cli_manifest_path_temp, 'r') as f_cli_manifest:
+                    orpheus_output_manifest_list = json.load(f_cli_manifest)
+                # Clean up the temporary CLI manifest file
+                try:
+                    os.unlink(orpheus_cli_manifest_path_temp)
+                except OSError as e_unlink:
+                    # Log this, but don't fail the whole process if unlink fails
+                    print(f"Warning: Could not delete temporary Orpheus CLI manifest {orpheus_cli_manifest_path_temp}: {e_unlink}", file=sys.stderr)
+            else:
+                raise RuntimeError(f"Orpheus TTS CLI completed but its manifest file {orpheus_cli_manifest_path_temp} not found.")
+        else:
+            # This path is taken if output_path was not provided to the main orpheus_tts wrapper
+            orpheus_output_manifest_list = json.loads(tts_result.stdout)
         
         if not isinstance(orpheus_output_manifest_list, list):
             # This case should ideally be handled by Orpheus CLI exiting non-zero if output is not as expected.
             # If it can still exit 0 with non-list JSON, this check is useful.
-            raise json.JSONDecodeError("Orpheus CLI did not return a list for --texts-file mode.", tts_result.stdout, 0)
+            # Orpheus CLI should output a list when --texts-file is used.
+            # If it's a single dict, it might be from a direct --text call (not used here) or an error manifest.
+            error_source_info = str(orpheus_cli_manifest_path_temp) if orpheus_cli_manifest_path_temp else "stdout"
+            raise json.JSONDecodeError(
+                f"Orpheus CLI did not return a list as expected (source: {error_source_info}). Got: {type(orpheus_output_manifest_list)}",
+                json.dumps(orpheus_output_manifest_list) if isinstance(orpheus_output_manifest_list, dict) else str(orpheus_output_manifest_list)[:200], 0)
 
     except subprocess.CalledProcessError as e:
-        # Stderr from Orpheus CLI should provide good error info
-        error_detail = e.stderr if e.stderr else e.stdout # Sometimes errors go to stdout
-        os.unlink(tmp_texts_file_path) # Ensure cleanup
+        error_detail = e.stderr
+        if e.stdout: # Include stdout as it might have more info from the script
+            error_detail = f"{e.stderr}\nCLI STDOUT: {e.stdout}"
+        if os.path.exists(tmp_texts_file_path): os.unlink(tmp_texts_file_path)
+        if orpheus_cli_manifest_path_temp and os.path.exists(orpheus_cli_manifest_path_temp):
+             try: os.unlink(orpheus_cli_manifest_path_temp) # Attempt to clean up temp manifest on error too
+             except OSError: pass
         raise RuntimeError(f"Orpheus TTS CLI failed: {error_detail}") from e
     except json.JSONDecodeError as e:
-        # This means Orpheus CLI output was not valid JSON
-        os.unlink(tmp_texts_file_path) # Ensure cleanup
-        raise RuntimeError(f"Invalid JSON from Orpheus TTS CLI: {tts_result.stdout if 'tts_result' in locals() else 'Unknown output'}") from e
+        error_source = str(orpheus_cli_manifest_path_temp) if orpheus_cli_manifest_path_temp else "stdout"
+        output_preview = ""
+        if orpheus_cli_manifest_path_temp and orpheus_cli_manifest_path_temp.is_file():
+            with open(orpheus_cli_manifest_path_temp, 'r') as f_err: output_preview = f_err.read(500)
+        elif 'tts_result' in locals() and hasattr(tts_result, 'stdout'):
+            output_preview = tts_result.stdout[:500]
+        if os.path.exists(tmp_texts_file_path): os.unlink(tmp_texts_file_path)
+        raise RuntimeError(f"Invalid JSON from Orpheus TTS CLI (source: {error_source}): {e}. Content preview: {output_preview}") from e
+    except Exception as e: # Catch other potential errors
+        if os.path.exists(tmp_texts_file_path): os.unlink(tmp_texts_file_path)
+        if orpheus_cli_manifest_path_temp and os.path.exists(orpheus_cli_manifest_path_temp):
+            try: os.unlink(orpheus_cli_manifest_path_temp)
+            except OSError: pass
+        raise RuntimeError(f"Unexpected error during Orpheus TTS processing: {e}") from e
     finally:
+        # Ensure the temporary file for texts is always deleted
         if os.path.exists(tmp_texts_file_path):
-            os.unlink(tmp_texts_file_path)
+            try:
+                os.unlink(tmp_texts_file_path)
+            except OSError as e_unlink_final:
+                 print(f"Warning: Could not delete temporary texts file {tmp_texts_file_path} in finally block: {e_unlink_final}", file=sys.stderr)
 
-    # Step 4: Aggregate results into a single manifest
+
+    # Step 4: Build the final aggregated manifest (this part seems okay)
     final_aggregated_manifest = {
         "source_transcript_data_preview": {
             k: v for k, v in input_json_data.items() if k != "slides" and k != "segments" # Avoid large data
