@@ -65,7 +65,7 @@ def extract_transcript(pptx_path, output_path=None, cue_token="[transition]", st
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error extracting transcript: {e.stderr}") from e
 
-def piper_tts(transcript_path, output_path=None, step_id="tts_run"):
+def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path: str = "config/pipeline.yaml"):
     """
     Processes transcript through sentence chunking and TTS conversion pipeline.
     
@@ -77,6 +77,7 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run"):
         transcript_path (str): Path to input transcript JSON
         output_path (str, optional): Output file for TTS manifest
         step_id (str, optional): Pipeline step identifier
+        config_path (str, optional): Path to the pipeline configuration YAML file. Defaults to "config/pipeline.yaml".
     
     Returns:
         dict: Aggregated manifest containing all TTS outputs
@@ -113,7 +114,8 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run"):
         tts_cmd = [
             sys.executable, 'cli/piper_tts.py',
             '--text', chunk['text'],
-            '--step_id', f"{step_id}.chunk_{i}"
+            '--step_id', f"{step_id}.chunk_{i}",
+            '--config', config_path
         ]
         
         try:

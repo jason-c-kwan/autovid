@@ -3,6 +3,7 @@ import yaml
 import json
 import argparse
 import os
+import tempfile # Added for tts_run step
 from dotenv import load_dotenv
 import logging
 import sys # Added import
@@ -191,6 +192,77 @@ def main():
                      logging.warning("Skipping extract_transcript: check_datasets step did not run or failed.")
                 else:
                      logging.info("No stems found to extract transcripts.")
+
+            elif step_id == "tts_run":
+                step_params = step.get("parameters", {})
+                engine = step_params.get("engine")
+
+                if not engine:
+                    logging.error(f"TTS engine not specified in parameters for step '{step_id}'. Skipping.")
+                    continue
+
+                if 'all_transcripts' not in locals() or not all_transcripts:
+                    logging.warning(f"Skipping TTS step '{step_id}': No transcripts available from previous steps.")
+                    continue
+
+                all_tts_manifests = []
+                tts_manifest_output_dir = os.path.join(workspace_root, "02_tts_audio")
+                os.makedirs(tts_manifest_output_dir, exist_ok=True)
+                logging.info(f"TTS output directory: {tts_manifest_output_dir}")
+
+                for idx, transcript_data in enumerate(all_transcripts):
+                    # Try to get a stem or ID from transcript_data for a more descriptive filename
+                    # Fallback to index if not available.
+                    # Assuming transcript_data might have 'source_stem' or 'id' from extract_transcript manifest
+                    source_identifier = transcript_data.get("source_stem") # Defaulting to check for source_stem
+                    if not source_identifier: # Fallback if source_stem is not present
+                         source_identifier = transcript_data.get("id", f"transcript_{idx}")
+
+
+                    current_tts_manifest_filename = f"{source_identifier}_{engine}_{idx}_manifest.json"
+                    current_tts_manifest_path = os.path.join(tts_manifest_output_dir, current_tts_manifest_filename)
+                    
+                    logging.info(f"Processing transcript {idx+1}/{len(all_transcripts)} for TTS using {engine} engine. Output manifest: {current_tts_manifest_path}")
+
+                    try:
+                        if engine == "piper":
+                            # Piper TTS wrapper expects a file path to the transcript JSON
+                            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".json", encoding='utf-8') as tmp_transcript_file:
+                                json.dump(transcript_data, tmp_transcript_file)
+                                temp_transcript_file_path = tmp_transcript_file.name
+                            
+                            try:
+                                manifest_dict = core.wrappers.piper_tts(
+                                    transcript_path=temp_transcript_file_path,
+                                    output_path=current_tts_manifest_path,
+                                    step_id=step_id, # Pass the main step_id for config lookup
+                                    config_path=args.pipeline_config
+                                )
+                                all_tts_manifests.append(manifest_dict)
+                                logging.info(f"Piper TTS successful for transcript {idx+1}. Manifest: {current_tts_manifest_path}")
+                            finally:
+                                os.unlink(temp_transcript_file_path) # Ensure temporary file is deleted
+
+                        elif engine == "orpheus":
+                            manifest_dict = core.wrappers.orpheus_tts(
+                                input_json_data=transcript_data,
+                                output_path=current_tts_manifest_path,
+                                step_id=step_id, # Pass the main step_id
+                                config_path=args.pipeline_config
+                            )
+                            all_tts_manifests.append(manifest_dict)
+                            logging.info(f"Orpheus TTS successful for transcript {idx+1}. Manifest: {current_tts_manifest_path}")
+                        
+                        else:
+                            logging.warning(f"Unsupported TTS engine '{engine}' for transcript {idx+1}. Skipping.")
+
+                    except RuntimeError as e:
+                        logging.error(f"RuntimeError during TTS processing for transcript {idx+1} with {engine}: {e}", exc_info=True)
+                    except Exception as e:
+                        logging.error(f"Unexpected error during TTS processing for transcript {idx+1} with {engine}: {e}", exc_info=True)
+                
+                logging.info(f"TTS run step '{step_id}' completed. Generated {len(all_tts_manifests)} TTS manifests.")
+                # The 'all_tts_manifests' list is now available for downstream steps if they are designed to use it.
 
             # Add other steps here as needed
             # elif step_id == "another_step":
