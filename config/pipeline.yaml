@@ -28,6 +28,19 @@ steps:
       orpheus_voice:          dan
       orpheus_temperature:    0.2
   - id: qc_pronounce
+    substeps:
+      - id: qc_pronounce_detect
+        parameters:
+          model: large-v3
+        thresholds:
+          wer: 0.10
+          mos: 3.5
+      - id: pronounce_fix
+        parameters:
+          max_attempts: 3
+          phoneme_hint:
+            piper: xsampa
+            orpheus: ssml_ipa
   - id: apply_rvc
   - id: splice_audio
   - id: sync_video

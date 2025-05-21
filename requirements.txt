@@ -7,4 +7,5 @@ pyyaml
 python-dotenv
 piper-tts
 onnxruntime-gpu
+whisperx
 -e ./third_party/Orpheus-TTS/orpheus_tts_pypi
