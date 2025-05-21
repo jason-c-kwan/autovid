@@ -264,9 +264,7 @@ def main():
             print(f"Manifest written to {out_path}", file=sys.stderr)
         except Exception as e:
             print(f"Error writing manifest to {args.out}: {e}", file=sys.stderr)
-            # If manifest writing fails, the overall status might still be success for audio
-            # but the script's primary output (manifest) failed.
-            # Consider if this should force a non-zero exit. For now, it doesn't change 'status'.
+            status = "failure" # Ensure failure if manifest writing fails
     else:
         print(manifest_json) # Print to stdout
 
@@ -274,6 +272,12 @@ def main():
     if status == "success":
         sys.exit(0)
     else:
+        # Ensure specific error message if text was empty, otherwise generic exit 1
+        if args.text and args.text.strip():
+            # If text was provided but another failure occurred (e.g. model load, synthesis, manifest write)
+            print(f"Exiting with status '{status}' due to an error during processing.", file=sys.stderr)
+        # If text was empty, an error message was already printed.
+        # If config params failed, messages were already printed.
         sys.exit(1)
 
 

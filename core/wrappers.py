@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 def check_datasets(data_dir, output_path=None, step_id="check_datasets"):
     """
@@ -88,11 +89,13 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path:
     import json
     
     # Step 1: Chunk the transcript
+    # transcript_preprocess.py expects the input file as a positional argument
+    # and does not use --step_id.
     preprocess_cmd = [
         sys.executable, 'cli/transcript_preprocess.py',
-        '--input', transcript_path,
-        '--chunk_mode', 'sentence',
-        '--step_id', step_id
+        transcript_path, # Positional argument for input file
+        '--chunk_mode', 'sentence'
+        # Removed '--step_id' as it's not an accepted argument
     ]
     
     try:
@@ -102,21 +105,61 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path:
             text=True,
             check=True
         )
-        chunks = json.loads(pre_result.stdout)
+        # chunks_data is the full JSON structure from transcript_preprocess.py
+        chunks_data = json.loads(pre_result.stdout)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Transcript preprocessing failed: {e.stderr}") from e
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Invalid JSON from preprocessor: {e}") from e
+        error_msg = f"Invalid JSON from preprocessor: {e}"
+        if 'pre_result' in locals() and hasattr(pre_result, 'stdout'):
+            error_msg += f"\nOutput was: {pre_result.stdout[:500]}" # Show first 500 chars of output
+        raise RuntimeError(error_msg) from e
 
     # Step 2: Process each chunk with TTS
     tts_manifest = []
-    for i, chunk in enumerate(chunks):
+    
+    # Determine the directory for storing individual chunk manifests and audio files
+    # This will be a subdirectory relative to the final aggregated manifest's location
+    individual_chunks_dir = None
+    if output_path: # output_path is for the final aggregated manifest
+        agg_manifest_path = Path(output_path)
+        individual_chunks_dir = agg_manifest_path.parent / "piper_audio_chunks"
+        try:
+            individual_chunks_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            # If we can't create this dir, we can't reliably save chunk outputs.
+            # The CLI script might default to CWD, which is not desired.
+            raise RuntimeError(f"Failed to create directory for individual TTS chunks {individual_chunks_dir}: {e}") from e
+            
+    all_text_segments_to_speak = []
+    if isinstance(chunks_data, dict) and 'slides' in chunks_data:
+        for slide in chunks_data.get('slides', []):
+            if isinstance(slide, dict) and 'tts_texts' in slide:
+                for text_segment in slide.get('tts_texts', []):
+                    # Ensure we are adding non-empty strings to be spoken
+                    if isinstance(text_segment, str) and text_segment.strip():
+                        all_text_segments_to_speak.append(text_segment)
+    else:
+        # transcript_preprocess.py is expected to return a dictionary with a 'slides' key.
+        # If not, it's an unexpected structure.
+        raise RuntimeError(
+            f"Unexpected data structure from transcript preprocessor. Expected a dict with 'slides'. "
+            f"Got: {type(chunks_data)}. Content preview: {str(chunks_data)[:500]}"
+        )
+
+    for i, text_to_speak in enumerate(all_text_segments_to_speak):
+        chunk_specific_manifest_path = None
+        if individual_chunks_dir:
+            chunk_specific_manifest_path = individual_chunks_dir / f"chunk_{i}_manifest.json"
+
         tts_cmd = [
             sys.executable, 'cli/piper_tts.py',
-            '--text', chunk['text'],
-            '--step_id', f"{step_id}.chunk_{i}",
+            '--text', text_to_speak, # text_to_speak is now a string
+            '--step_id', step_id,
             '--config', config_path
         ]
+        if chunk_specific_manifest_path:
+            tts_cmd.extend(['--out', str(chunk_specific_manifest_path)])
         
         try:
             tts_result = subprocess.run(
@@ -125,12 +168,36 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path:
                 text=True,
                 check=True
             )
-            tts_data = json.loads(tts_result.stdout)
+            # If chunk_specific_manifest_path was provided to cli/piper_tts.py,
+            # the script writes its JSON output to that file, not to stdout.
+            # So, we need to read the manifest from that file.
+            if chunk_specific_manifest_path:
+                if chunk_specific_manifest_path.is_file():
+                    with open(chunk_specific_manifest_path, 'r') as f_manifest:
+                        tts_data = json.load(f_manifest)
+                else:
+                    # This would be an unexpected error if the subprocess didn't fail
+                    raise RuntimeError(f"TTS CLI completed but manifest file {chunk_specific_manifest_path} not found.")
+            else:
+                # This case should ideally not be hit if individual_chunks_dir is always created when output_path is present.
+                # If --out was not passed to CLI, it prints to stdout.
+                tts_data = json.loads(tts_result.stdout)
+            
             tts_manifest.append(tts_data)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"TTS failed for chunk {i}: {e.stderr}") from e
+            # Include stdout from the failed process if available, as it might contain useful error details from the script itself
+            error_detail = e.stderr
+            if e.stdout:
+                error_detail = f"{e.stderr}\nCLI STDOUT: {e.stdout}"
+            raise RuntimeError(f"TTS failed for chunk {i}: {error_detail}") from e
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"Invalid TTS output for chunk {i}: {e}") from e
+            # This error can happen if we try to parse stdout when we shouldn't,
+            # or if the manifest file itself is corrupted.
+            error_source = "stdout" if not chunk_specific_manifest_path else str(chunk_specific_manifest_path)
+            raise RuntimeError(f"Invalid JSON from TTS output for chunk {i} (source: {error_source}): {e}") from e
+        except Exception as e: # Catch other potential errors like file IO issues
+            raise RuntimeError(f"Unexpected error processing TTS for chunk {i}: {e}") from e
+
 
     # Step 3: Save aggregated manifest
     final_manifest = {
@@ -180,9 +247,10 @@ def orpheus_tts(input_json_data: dict, output_path: str = None, step_id: str = "
     preprocessed_json_output = None
     try:
         # Assuming cli/transcript_preprocess.py takes 'input_file' not 'input' as per its own parser
+        # Corrected: transcript_preprocess.py expects the input file as a positional argument.
         preprocess_cmd = [
             sys.executable, 'cli/transcript_preprocess.py',
-            '--input_file', tmp_input_file_path, 
+            tmp_input_file_path, # Positional argument for input file
             '--chunk_mode', 'slide'
         ]
         
