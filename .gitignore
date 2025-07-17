@@ -15,6 +15,11 @@ out/*
 # Ignore contents of out directory but keep the directory
 models/*
 !models/.gitkeep
+!models/rvc/
+
+# Ignore RVC model files but keep directory structure
+models/rvc/*.pth
+models/rvc/*.index
 
 # Ignore directory
 test_workspace/

@@ -57,12 +57,17 @@ autovid/
 - **COMPLETE**: Dataset validation, PPTX processing, TTS generation, audio QC, transcription
 - **MISSING**: Voice conversion (RVC), audio splicing, video sync, final rendering, subtitle generation
 
+### Environment Setup
+- **Conda Environment**: Use the `autovid` environment for all commands
+- **Activation**: `source ~/.bashrc && eval "$(/home/jason/mambaforge/bin/conda shell.bash hook)" && conda activate autovid`
+- **Python Path**: Set `PYTHONPATH=/home/jason/git_repos/autovid` for module imports
+
 ### Common Commands
 - Check datasets: `python cli/check_datasets.py`
 - Extract notes: `python cli/extract_transcript.py <file.pptx>`
 - Generate TTS: `python cli/piper_tts.py <transcript.json>`
 - Quality control: `python core/qc_audio.py <audio_manifest.json>`
-- Run full pipeline: `python autogen/conductor.py`
+- Run full pipeline: `PYTHONPATH=/home/jason/git_repos/autovid python autogen/conductor.py`
 
 ### Dependencies
 - AutoGen ≥ 0.4 for agent framework
