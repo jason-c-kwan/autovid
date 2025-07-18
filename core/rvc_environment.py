@@ -169,43 +169,54 @@ def run_rvc_in_environment(
     """
     try:
         project_root = Path(__file__).parent.parent
-        rvc_script = project_root / "third_party" / "Mangio-RVC-Fork" / "infer_batch_rvc.py"
         
-        # Build command for RVC environment
+        # Use our own RVC inference script instead of the third-party batch script
+        rvc_script = project_root / "cli" / "rvc_inference.py"
+        
+        # Build command for our RVC inference script - use absolute paths
         cmd = [
             "conda", "run", "-n", "autovid-rvc",
             "python", str(rvc_script),
-            str(rvc_params.get("f0_up_key", 0)),           # f0_up_key
-            input_audio,                                    # input_audio
-            index_path,                                     # index_path
-            rvc_params.get("f0_method", "harvest"),         # f0_method
-            str(Path(output_audio).parent),                 # output_dir
-            model_path,                                     # model_path
-            str(rvc_params.get("index_rate", 0.66)),        # index_rate
-            rvc_params.get("device", "cuda:0"),             # device
-            str(rvc_params.get("is_half", True)),           # is_half
-            str(rvc_params.get("filter_radius", 3)),        # filter_radius
-            str(rvc_params.get("resample_sr", 0)),          # resample_sr
-            str(rvc_params.get("rms_mix_rate", 1.0)),       # rms_mix_rate
-            str(rvc_params.get("protect", 0.33))            # protect
+            "--model_path", str(Path(model_path).absolute()),
+            "--index_path", str(Path(index_path).absolute()),
+            "--input", str(Path(input_audio).absolute()),
+            "--output", str(Path(output_audio).absolute()),
+            "--f0_up_key", str(rvc_params.get("f0_up_key", 0)),
+            "--f0_method", rvc_params.get("f0_method", "harvest"),
+            "--index_rate", str(rvc_params.get("index_rate", 0.66)),
+            "--device", rvc_params.get("device", "cuda:0"),
+            "--filter_radius", str(rvc_params.get("filter_radius", 3)),
+            "--resample_sr", str(rvc_params.get("resample_sr", 0)),
+            "--rms_mix_rate", str(rvc_params.get("rms_mix_rate", 1.0)),
+            "--protect", str(rvc_params.get("protect", 0.33)),
+            "--crepe_hop_length", str(rvc_params.get("crepe_hop_length", 128))
         ]
+        
+        # Add --is_half flag if enabled
+        if rvc_params.get("is_half", True):
+            cmd.append("--is_half")
         
         # Set environment variables
         env = os.environ.copy()
         env["PYTHONPATH"] = str(project_root / "third_party" / "Mangio-RVC-Fork")
         
-        # Execute in RVC environment
+        # Execute in RVC environment - use RVC directory as working directory
+        rvc_dir = project_root / "third_party" / "Mangio-RVC-Fork"
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             env=env,
-            cwd=working_dir,
+            cwd=rvc_dir,  # Run from RVC directory so relative paths work
             timeout=300  # 5 minute timeout
         )
         
         if result.returncode == 0:
-            return True, ""
+            # Our script outputs directly to the target file, so just check if it exists
+            if Path(output_audio).exists():
+                return True, ""
+            else:
+                return False, "RVC conversion completed but no output file found"
         else:
             return False, f"RVC Error: {result.stderr}"
             
