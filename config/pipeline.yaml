@@ -10,6 +10,27 @@ rvc_model_path:  /models/rvc/voice_final.pth
 gpu_index:       0
 chunk_seconds:   20            # how the TTS splitter will chunk text
 
+# --- RVC Configuration -----------------------------------
+rvc:
+  executable: third_party/Mangio-RVC-Fork/infer_batch_rvc.py
+  model_path: models/rvc/jason.pth
+  index_path: models/rvc/jason.index
+  f0_up_key: 0                    # pitch shift in semitones
+  f0_method: harvest              # harvest, pm, crepe, rmvpe
+  index_rate: 0.66                # feature retrieval ratio
+  device: cuda:0                  # cuda:0, cpu, mps
+  is_half: true                   # use half precision
+  filter_radius: 3                # harvest median filter radius
+  resample_sr: 0                  # resample rate (0=no resample)
+  rms_mix_rate: 1.0               # volume envelope mixing
+  protect: 0.33                   # voiceless consonant protection
+
+# --- Audio Splicing Configuration ------------------------
+audio_splicing:
+  crossfade_duration: 0.1         # crossfade duration in seconds
+  target_db: -20.0                # target audio level in dB
+  normalize: true                 # normalize audio levels
+
 # --- Pronunciation & QC -----------------------------------
 pronun_csv:      config/pronunciations.csv
 qc_threshold:    0.85          # cosine similarity score to accept a chunk
