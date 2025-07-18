@@ -1,3 +1,6 @@
 [submodule "third_party/Orpheus-TTS"]
 	path = third_party/Orpheus-TTS
 	url = https://github.com/canopyai/Orpheus-TTS.git
+[submodule "third_party/Mangio-RVC-Fork"]
+	path = third_party/Mangio-RVC-Fork
+	url = https://github.com/Mangio621/Mangio-RVC-Fork.git
