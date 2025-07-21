@@ -32,6 +32,32 @@ audio_splicing:
   target_db: -20.0                # target audio level in dB
   normalize: true                 # normalize audio levels
 
+# --- Video Analysis Configuration -------------------------
+video_analysis:
+  scene_threshold: 0.4            # scene detection sensitivity (0.0-1.0, higher = less sensitive)
+  movement_threshold: 0.1         # movement detection sensitivity (0.0-1.0)
+  keynote_delay: 1.0              # keynote export delay compensation in seconds
+  min_scene_duration: 0.5         # minimum duration between scenes in seconds
+  validate_transitions: true      # validate against transcript transition cues
+  output_dir: workspace/video_analysis  # directory for analysis manifests
+
+# --- Video Synchronization Configuration ------------------
+video_sync:
+  keynote_delay: 1.0              # keynote export delay compensation in seconds
+  sync_tolerance: 0.1             # acceptable timing drift in seconds
+  crossfade_handling: smooth      # how to handle audio crossfades (smooth, sharp)
+  timing_validation: strict       # validation strictness level (strict, moderate, loose)
+  output_format: mp4              # final video format
+  quality_preset: medium          # ffmpeg encoding preset (ultrafast, fast, medium, slow, veryslow)
+  audio_codec: aac                # audio codec for final output
+  video_codec: copy               # video codec for final output (copy preserves original)
+  audio_bitrate: 128k             # audio bitrate for final output
+  sample_rate: 44100              # audio sample rate
+  drift_correction: progressive   # drift correction method (progressive, global, none)
+  validation_enabled: true        # enable sync quality validation
+  preview_clips: false            # create preview clips for manual verification
+  max_sync_offset: 0.5            # maximum allowed sync offset before error (seconds)
+
 # --- Pronunciation & QC -----------------------------------
 pronun_csv:      config/pronunciations.csv
 qc_threshold:    0.85          # cosine similarity score to accept a chunk
@@ -65,5 +91,11 @@ steps:
             orpheus: ssml_ipa
   - id: apply_rvc
   - id: splice_audio
+  - id: analyze_video
+    parameters:
+      scene_threshold: 0.4
+      movement_threshold: 0.1
+      keynote_delay: 1.0
+      validate_transitions: true
   - id: sync_video
   - id: make_srt

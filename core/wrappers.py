@@ -583,3 +583,274 @@ def whisper_transcribe( # noqa: E501 (line too long)
                 os.remove(tmp_output_path)
             except OSError as e:
                 print(f"Warning: Could not delete temporary output file {tmp_output_path}: {e}", file=sys.stderr)
+
+
+def run_rvc_convert(
+    input_manifest: str,
+    output_dir: str,
+    config_path: str = "config/pipeline.yaml",
+    step_id: str = "apply_rvc"
+) -> Dict[str, Any]:
+    """
+    Wrapper for RVC voice conversion CLI.
+    
+    Args:
+        input_manifest: Path to TTS audio manifest
+        output_dir: Output directory for RVC converted audio
+        config_path: Path to pipeline configuration file
+        step_id: Identifier for the RVC step
+        
+    Returns:
+        Dict: RVC conversion results
+        
+    Raises:
+        RuntimeError: If RVC conversion fails
+    """
+    cmd = [
+        sys.executable, "cli/rvc_convert.py",
+        "--input", input_manifest,
+        "--output", output_dir,
+        "--config", config_path
+    ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # Load the generated manifest
+        manifest_path = Path(output_dir) / "rvc_conversion_manifest.json"
+        if manifest_path.exists():
+            with open(manifest_path, 'r') as f:
+                return json.load(f)
+        else:
+            raise RuntimeError(f"RVC manifest not found at {manifest_path}")
+            
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"RVC conversion failed: {e.stderr}") from e
+
+
+def run_splice_audio(
+    input_manifest: str,
+    output_dir: str,
+    output_name: str = "final_narration.wav",
+    config_path: str = "config/pipeline.yaml",
+    step_id: str = "splice_audio"
+) -> Dict[str, Any]:
+    """
+    Wrapper for audio splicing CLI.
+    
+    Args:
+        input_manifest: Path to RVC audio manifest
+        output_dir: Output directory for spliced audio
+        output_name: Output filename for spliced audio
+        config_path: Path to pipeline configuration file
+        step_id: Identifier for the splicing step
+        
+    Returns:
+        Dict: Audio splicing results
+        
+    Raises:
+        RuntimeError: If audio splicing fails
+    """
+    cmd = [
+        sys.executable, "cli/splice_audio.py",
+        "--input", input_manifest,
+        "--output", output_dir,
+        "--output-name", output_name,
+        "--config", config_path
+    ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # Load the generated manifest
+        manifest_path = Path(output_dir) / "splice_manifest.json"
+        if manifest_path.exists():
+            with open(manifest_path, 'r') as f:
+                return json.load(f)
+        else:
+            raise RuntimeError(f"Splice manifest not found at {manifest_path}")
+            
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Audio splicing failed: {e.stderr}") from e
+
+
+def analyze_video(video_path, transcript_path=None, output_path=None, 
+                 scene_threshold=0.4, movement_threshold=0.1, keynote_delay=1.0,
+                 step_id="analyze_video"):
+    """
+    Calls cli/analyze_video.py to analyze video for scene transitions and movement ranges.
+    
+    Args:
+        video_path (str): Path to the video file to analyze
+        transcript_path (str, optional): Path to transcript JSON for validation. Defaults to None.
+        output_path (str, optional): Path for analysis manifest output. Defaults to None.
+        scene_threshold (float, optional): Scene detection sensitivity. Defaults to 0.4.
+        movement_threshold (float, optional): Movement detection sensitivity. Defaults to 0.1.
+        keynote_delay (float, optional): Keynote delay compensation in seconds. Defaults to 1.0.
+        step_id (str, optional): Step identifier for pipeline integration. Defaults to "analyze_video".
+    
+    Returns:
+        dict: Analysis manifest containing scene transitions and movement ranges
+        
+    Raises:
+        RuntimeError: If video analysis fails
+    """
+    import json
+    
+    command = [sys.executable, 'cli/analyze_video.py', video_path]
+    
+    if transcript_path:
+        command.extend(['--transcript', transcript_path])
+    
+    if output_path:
+        command.extend(['--output', output_path])
+    
+    command.extend([
+        '--scene-threshold', str(scene_threshold),
+        '--movement-threshold', str(movement_threshold),
+        '--keynote-delay', str(keynote_delay),
+        '--step-id', step_id
+    ])
+    
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # Parse the JSON output from the CLI tool
+        try:
+            analysis_result = json.loads(result.stdout)
+            
+            # If output_path was specified and file exists, load the full manifest
+            if output_path and Path(output_path).exists():
+                with open(output_path, 'r') as f:
+                    full_manifest = json.load(f)
+                return full_manifest
+            else:
+                # Return the summary result
+                return analysis_result
+                
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Failed to parse video analysis output: {e}") from e
+        
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Video analysis failed: {e.stderr}") from e
+
+
+def sync_video(video_path: str,
+               audio_path: str,
+               output_path: str,
+               video_manifest: str = None,
+               audio_manifest: str = None,
+               step_id: str = "sync_video",
+               config_path: str = "config/pipeline.yaml") -> Dict[str, Any]:
+    """
+    Synchronizes video with processed audio using the AutoVid sync engine.
+    
+    This wrapper function calls cli/sync_video.py to perform video-audio synchronization
+    using timing manifests from video analysis and audio splicing steps. It supports
+    both basic and advanced synchronization modes with comprehensive validation.
+    
+    Args:
+        video_path (str): Path to input video file
+        audio_path (str): Path to input audio file  
+        output_path (str): Path for output synchronized video
+        video_manifest (str, optional): Path to video analysis manifest
+        audio_manifest (str, optional): Path to audio splice manifest
+        step_id (str, optional): Identifier for the sync step. Defaults to "sync_video"
+        config_path (str, optional): Path to pipeline configuration. Defaults to "config/pipeline.yaml"
+        
+    Returns:
+        dict: Synchronization manifest containing sync points and validation results
+        
+    Raises:
+        RuntimeError: If video synchronization fails
+    """
+    import json
+    import tempfile
+    import os
+    
+    # Build command
+    command = [sys.executable, 'cli/sync_video.py', video_path, audio_path, output_path]
+    
+    # Add optional manifests
+    if video_manifest:
+        command.extend(['--video-manifest', video_manifest])
+    
+    if audio_manifest:
+        command.extend(['--audio-manifest', audio_manifest])
+    
+    # Add config
+    command.extend(['--config', config_path])
+    
+    # Enable validation and create temporary manifest file
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json') as tmp_manifest:
+        tmp_manifest_path = tmp_manifest.name
+    
+    command.extend([
+        '--validate',
+        '--sync-manifest', tmp_manifest_path
+    ])
+    
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # Load the synchronization manifest
+        sync_manifest = {}
+        if os.path.exists(tmp_manifest_path):
+            try:
+                with open(tmp_manifest_path, 'r') as f:
+                    sync_manifest = json.load(f)
+            except json.JSONDecodeError as e:
+                # If manifest parsing fails, create a basic success response
+                sync_manifest = {
+                    'video_sync': {
+                        'output_video': output_path,
+                        'status': 'success',
+                        'step_id': step_id,
+                        'manifest_parse_error': str(e)
+                    }
+                }
+        else:
+            # If no manifest was created, create a basic success response
+            sync_manifest = {
+                'video_sync': {
+                    'output_video': output_path,
+                    'status': 'success',
+                    'step_id': step_id
+                }
+            }
+        
+        # Clean up temporary file
+        try:
+            os.unlink(tmp_manifest_path)
+        except OSError:
+            pass
+        
+        return sync_manifest
+        
+    except subprocess.CalledProcessError as e:
+        # Clean up temporary file on error
+        try:
+            os.unlink(tmp_manifest_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"Video synchronization failed: {e.stderr}") from e

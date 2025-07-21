@@ -264,8 +264,283 @@ def main():
                 logging.info(f"TTS run step '{step_id}' completed. Generated {len(all_tts_manifests)} TTS manifests.")
                 # The 'all_tts_manifests' list is now available for downstream steps if they are designed to use it.
 
+            elif step_id == "apply_rvc":
+                if 'all_tts_manifests' not in locals() or not all_tts_manifests:
+                    logging.warning(f"Skipping RVC step '{step_id}': No TTS manifests available from previous steps.")
+                    continue
+
+                all_rvc_manifests = []
+                rvc_output_dir = os.path.join(workspace_root, "03_rvc_audio")
+                os.makedirs(rvc_output_dir, exist_ok=True)
+                logging.info(f"RVC output directory: {rvc_output_dir}")
+
+                for idx, tts_manifest in enumerate(all_tts_manifests):
+                    # Generate input manifest path for RVC
+                    tts_manifest_path = tts_manifest.get("manifest_path")
+                    if not tts_manifest_path:
+                        logging.warning(f"No manifest path found for TTS manifest {idx+1}, skipping RVC conversion.")
+                        continue
+
+                    try:
+                        logging.info(f"Processing TTS manifest {idx+1}/{len(all_tts_manifests)} through RVC.")
+                        
+                        rvc_manifest = core.wrappers.run_rvc_convert(
+                            input_manifest=tts_manifest_path,
+                            output_dir=rvc_output_dir,
+                            config_path=args.pipeline_config,
+                            step_id=step_id
+                        )
+                        
+                        all_rvc_manifests.append(rvc_manifest)
+                        logging.info(f"RVC conversion {idx+1} completed successfully.")
+                        
+                    except RuntimeError as e:
+                        logging.error(f"RuntimeError during RVC conversion for manifest {idx+1}: {e}", exc_info=True)
+                    except Exception as e:
+                        logging.error(f"Unexpected error during RVC conversion for manifest {idx+1}: {e}", exc_info=True)
+
+                logging.info(f"RVC step '{step_id}' completed. Generated {len(all_rvc_manifests)} RVC manifests.")
+
+            elif step_id == "splice_audio":
+                if 'all_rvc_manifests' not in locals() or not all_rvc_manifests:
+                    logging.warning(f"Skipping audio splicing step '{step_id}': No RVC manifests available from previous steps.")
+                    continue
+
+                all_splice_manifests = []
+                splice_output_dir = os.path.join(workspace_root, "04_spliced_audio")
+                os.makedirs(splice_output_dir, exist_ok=True)
+                logging.info(f"Audio splicing output directory: {splice_output_dir}")
+
+                for idx, rvc_manifest in enumerate(all_rvc_manifests):
+                    # Generate RVC manifest path for splicing
+                    rvc_manifest_path = os.path.join(workspace_root, "03_rvc_audio", "rvc_conversion_manifest.json")
+                    
+                    try:
+                        logging.info(f"Splicing RVC audio chunks {idx+1}/{len(all_rvc_manifests)}.")
+                        
+                        # Generate unique output filename
+                        output_name = f"final_narration_{idx}.wav"
+                        
+                        splice_manifest = core.wrappers.run_splice_audio(
+                            input_manifest=rvc_manifest_path,
+                            output_dir=splice_output_dir,
+                            output_name=output_name,
+                            config_path=args.pipeline_config,
+                            step_id=step_id
+                        )
+                        
+                        all_splice_manifests.append(splice_manifest)
+                        logging.info(f"Audio splicing {idx+1} completed successfully. Output: {output_name}")
+                        
+                    except RuntimeError as e:
+                        logging.error(f"RuntimeError during audio splicing for manifest {idx+1}: {e}", exc_info=True)
+                    except Exception as e:
+                        logging.error(f"Unexpected error during audio splicing for manifest {idx+1}: {e}", exc_info=True)
+
+                logging.info(f"Audio splicing step '{step_id}' completed. Generated {len(all_splice_manifests)} splice manifests.")
+
+            elif step_id == "analyze_video":
+                if 'stems' not in locals() or not stems:
+                    logging.warning(f"Skipping video analysis step '{step_id}': No stems available from check_datasets.")
+                    continue
+
+                all_video_analyses = []
+                video_analysis_output_dir = os.path.join(workspace_root, "05_video_analysis")
+                os.makedirs(video_analysis_output_dir, exist_ok=True)
+                logging.info(f"Video analysis output directory: {video_analysis_output_dir}")
+
+                # Get step parameters
+                step_params = step.get("parameters", {})
+                scene_threshold = step_params.get("scene_threshold", 0.4)
+                movement_threshold = step_params.get("movement_threshold", 0.1)
+                keynote_delay = step_params.get("keynote_delay", 1.0)
+                validate_transitions = step_params.get("validate_transitions", True)
+
+                for stem in stems:
+                    # Look for video file (.mov or .mp4)
+                    video_path = None
+                    for ext in ['.mov', '.mp4']:
+                        candidate_path = os.path.join(data_dir, f"{stem}{ext}")
+                        if os.path.exists(candidate_path):
+                            video_path = candidate_path
+                            break
+                    
+                    if not video_path:
+                        logging.warning(f"No video file found for stem '{stem}' (checked .mov and .mp4)")
+                        continue
+
+                    try:
+                        logging.info(f"Analyzing video for {stem}: {video_path}")
+                        
+                        # Generate output path for analysis manifest
+                        analysis_manifest_path = os.path.join(video_analysis_output_dir, f"{stem}_video_analysis.json")
+                        
+                        # Look for transcript manifest for validation
+                        transcript_path = None
+                        if validate_transitions:
+                            transcript_manifest_dir = os.path.join(workspace_root, "01_transcripts")
+                            transcript_manifest_path = os.path.join(transcript_manifest_dir, f"{stem}_transcript_manifest.json")
+                            if os.path.exists(transcript_manifest_path):
+                                transcript_path = transcript_manifest_path
+                            else:
+                                logging.warning(f"Transcript manifest not found for validation: {transcript_manifest_path}")
+                        
+                        # Perform video analysis
+                        video_analysis = core.wrappers.analyze_video(
+                            video_path=video_path,
+                            transcript_path=transcript_path,
+                            output_path=analysis_manifest_path,
+                            scene_threshold=scene_threshold,
+                            movement_threshold=movement_threshold,
+                            keynote_delay=keynote_delay,
+                            step_id=step_id
+                        )
+                        
+                        all_video_analyses.append(video_analysis)
+                        logging.info(f"Video analysis for {stem} completed successfully. Manifest: {analysis_manifest_path}")
+                        
+                        # Log analysis summary
+                        if 'video_analysis' in video_analysis:
+                            analysis_data = video_analysis['video_analysis']
+                            scene_count = analysis_data.get('total_scenes', 0)
+                            movement_count = analysis_data.get('total_movements', 0)
+                            validation_status = analysis_data.get('validation', {}).get('status', 'UNKNOWN')
+                            logging.info(f"  {scene_count} scenes, {movement_count} movements, validation: {validation_status}")
+                        
+                    except RuntimeError as e:
+                        logging.error(f"RuntimeError during video analysis for {stem}: {e}", exc_info=True)
+                    except Exception as e:
+                        logging.error(f"Unexpected error during video analysis for {stem}: {e}", exc_info=True)
+
+                logging.info(f"Video analysis step '{step_id}' completed. Analyzed {len(all_video_analyses)} videos.")
+
+            elif step_id == "sync_video":
+                # Check if we have the required inputs
+                required_inputs = []
+                missing_inputs = []
+                
+                # Check for video files from stems
+                if 'stems' in locals() and stems:
+                    video_files = []
+                    for stem in stems:
+                        # Look for video file (.mov or .mp4)
+                        video_path = None
+                        for ext in ['.mov', '.mp4']:
+                            candidate_path = os.path.join(data_dir, f"{stem}{ext}")
+                            if os.path.exists(candidate_path):
+                                video_path = candidate_path
+                                break
+                        
+                        if video_path:
+                            video_files.append((stem, video_path))
+                        else:
+                            missing_inputs.append(f"Video file for stem: {stem}")
+                    required_inputs.extend(video_files)
+                else:
+                    missing_inputs.append("No stems available from check_datasets")
+                
+                # Check for audio splice manifests
+                if 'all_splice_manifests' in locals() and all_splice_manifests:
+                    audio_manifests = all_splice_manifests
+                else:
+                    missing_inputs.append("Audio splice manifests from splice_audio step")
+                
+                # Check for video analysis manifests
+                if 'all_video_analyses' in locals() and all_video_analyses:
+                    video_analyses = all_video_analyses
+                else:
+                    missing_inputs.append("Video analysis manifests from analyze_video step")
+                
+                if missing_inputs:
+                    logging.warning(f"Skipping sync_video step '{step_id}': Missing inputs: {missing_inputs}")
+                    continue
+                
+                # Perform video synchronization for each stem
+                all_sync_manifests = []
+                sync_output_dir = os.path.join(workspace_root, "06_synchronized_videos")
+                os.makedirs(sync_output_dir, exist_ok=True)
+                logging.info(f"Video sync output directory: {sync_output_dir}")
+                
+                for idx, (stem, video_path) in enumerate(video_files):
+                    try:
+                        logging.info(f"Synchronizing video for {stem}: {video_path}")
+                        
+                        # Find corresponding audio splice manifest
+                        audio_manifest_path = None
+                        if idx < len(audio_manifests):
+                            # Use the splice manifest if available
+                            if isinstance(audio_manifests[idx], dict) and 'manifest_path' in audio_manifests[idx]:
+                                audio_manifest_path = audio_manifests[idx]['manifest_path']
+                            elif isinstance(audio_manifests[idx], str):
+                                audio_manifest_path = audio_manifests[idx]
+                        
+                        if not audio_manifest_path or not os.path.exists(audio_manifest_path):
+                            # Fallback: look for splice manifest by stem
+                            splice_manifest_dir = os.path.join(workspace_root, "04_spliced_audio")
+                            audio_manifest_path = os.path.join(splice_manifest_dir, f"{stem}_splice_manifest.json")
+                        
+                        # Find corresponding video analysis manifest
+                        video_manifest_path = None
+                        if idx < len(video_analyses):
+                            if isinstance(video_analyses[idx], dict):
+                                # Extract video analysis manifest path
+                                video_analysis_dir = os.path.join(workspace_root, "05_video_analysis")
+                                video_manifest_path = os.path.join(video_analysis_dir, f"{stem}_video_analysis.json")
+                        
+                        if not video_manifest_path or not os.path.exists(video_manifest_path):
+                            logging.warning(f"Video analysis manifest not found for {stem}, using basic sync")
+                            video_manifest_path = None
+                        
+                        # Find the spliced audio file
+                        spliced_audio_path = None
+                        if audio_manifest_path and os.path.exists(audio_manifest_path):
+                            try:
+                                with open(audio_manifest_path, 'r') as f:
+                                    splice_data = json.load(f)
+                                    if 'output_audio' in splice_data:
+                                        spliced_audio_path = splice_data['output_audio']
+                                    elif 'audio_splice' in splice_data and 'output_path' in splice_data['audio_splice']:
+                                        spliced_audio_path = splice_data['audio_splice']['output_path']
+                            except (json.JSONDecodeError, KeyError) as e:
+                                logging.warning(f"Failed to parse splice manifest for {stem}: {e}")
+                        
+                        if not spliced_audio_path or not os.path.exists(spliced_audio_path):
+                            # Fallback: look for spliced audio file by stem
+                            splice_audio_dir = os.path.join(workspace_root, "04_spliced_audio")
+                            spliced_audio_path = os.path.join(splice_audio_dir, f"{stem}_final.wav")
+                            if not os.path.exists(spliced_audio_path):
+                                spliced_audio_path = os.path.join(splice_audio_dir, f"final_narration_{idx}.wav")
+                        
+                        if not spliced_audio_path or not os.path.exists(spliced_audio_path):
+                            logging.error(f"Spliced audio file not found for {stem}")
+                            continue
+                        
+                        # Generate output path for synchronized video
+                        output_video_path = os.path.join(sync_output_dir, f"{stem}_synchronized.mp4")
+                        
+                        # Perform synchronization
+                        sync_manifest = core.wrappers.sync_video(
+                            video_path=video_path,
+                            audio_path=spliced_audio_path,
+                            output_path=output_video_path,
+                            video_manifest=video_manifest_path,
+                            audio_manifest=audio_manifest_path,
+                            step_id=step_id,
+                            config_path=args.pipeline_config
+                        )
+                        
+                        all_sync_manifests.append(sync_manifest)
+                        logging.info(f"Video synchronization for {stem} completed successfully. Output: {output_video_path}")
+                        
+                    except RuntimeError as e:
+                        logging.error(f"RuntimeError during video synchronization for {stem}: {e}", exc_info=True)
+                    except Exception as e:
+                        logging.error(f"Unexpected error during video synchronization for {stem}: {e}", exc_info=True)
+                
+                logging.info(f"Video sync step '{step_id}' completed. Generated {len(all_sync_manifests)} synchronized videos.")
+
             # Add other steps here as needed
-            # elif step_id == "another_step":
+            # elif step_id == "make_srt":
             #     ...
 
             # Send result to planner if needed (adjust based on actual planner usage)
