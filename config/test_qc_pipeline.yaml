@@ -1,0 +1,70 @@
+# --- Paths -------------------------------------------------
+data_dir:        data
+video_dir:       data
+model_dir:       models
+workspace_root:  workspace
+
+# --- Models & hardware ------------------------------------
+tts_model_dir:   /models/ar_tortoise
+rvc_model_path:  /models/rvc/voice_final.pth
+gpu_index:       0
+chunk_seconds:   20            # how the TTS splitter will chunk text
+
+# --- RVC Configuration -----------------------------------
+rvc:
+  executable: cli/rvc_inference.py # our own RVC script (no third-party modification)
+  model_path: models/rvc/jason.pth
+  index_path: models/rvc/jason.index
+  f0_up_key: 0                    # pitch shift in semitones
+  f0_method: harvest              # harvest, pm, crepe, rmvpe
+  index_rate: 0.66                # feature retrieval ratio
+  device: cuda:2                  # cuda:2 for RTX 3090 performance
+  is_half: true                   # use half precision
+  filter_radius: 3                # harvest median filter radius
+  resample_sr: 0                  # resample rate (0=no resample)
+  rms_mix_rate: 1.0               # volume envelope mixing
+  protect: 0.33                   # voiceless consonant protection
+  crepe_hop_length: 128           # CREPE hop length parameter
+
+# --- Audio Splicing Configuration ------------------------
+audio_splicing:
+  crossfade_duration: 0.1         # crossfade duration in seconds
+  target_db: -20.0                # target audio level in dB
+  normalize: true                 # normalize audio levels
+
+# --- Video Analysis Configuration -------------------------
+video_analysis:
+  scene_threshold: 0.4            # scene detection sensitivity (0.0-1.0, higher = less sensitive)
+  movement_threshold: 0.1         # movement detection sensitivity (0.0-1.0)
+  keynote_delay: 1.0              # keynote export delay compensation in seconds
+  min_scene_duration: 0.5         # minimum duration between scenes in seconds
+  validate_transitions: true      # validate against transcript transition cues
+  output_dir: workspace/video_analysis  # directory for analysis manifests
+
+# --- Pipeline Steps ------------------------------------
+steps:
+  - id: check_datasets        # calls tasks.check_datasets()
+  - id: extract_transcript    # calls tasks.extract_transcript()
+    parameters:
+      cue: "[transition]"
+  - id: tts_run
+    parameters:
+      engine:                 orpheus # piper or orpheus
+      piper_model:            en_GB-northern_english_male-medium
+      orpheus_model:          canopylabs/orpheus-tts-0.1-finetune-prod
+      orpheus_voice:          dan
+      orpheus_temperature:    0.2
+  - id: qc_pronounce
+    substeps:
+      - id: qc_pronounce_detect
+        parameters:
+          model: large-v3
+        thresholds:
+          wer: 0.10
+          mos: 3.5
+      - id: pronounce_fix
+        parameters:
+          max_attempts: 3
+          phoneme_hint:
+            piper: xsampa
+            orpheus: ssml_ipa
