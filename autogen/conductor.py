@@ -264,6 +264,111 @@ def main():
                 logging.info(f"TTS run step '{step_id}' completed. Generated {len(all_tts_manifests)} TTS manifests.")
                 # The 'all_tts_manifests' list is now available for downstream steps if they are designed to use it.
 
+            elif step_id == "qc_pronounce":
+                if 'all_tts_manifests' not in locals() or not all_tts_manifests:
+                    logging.warning(f"Skipping QC step '{step_id}': No TTS manifests available.")
+                    continue
+                
+                # Extract parameters from pipeline config
+                step_params = step.get("parameters", {})
+                substeps = step.get("substeps", [])
+                
+                # Find QC detection substep parameters
+                detect_params = {}
+                detect_thresholds = {}
+                for substep in substeps:
+                    if substep.get("id") == "qc_pronounce_detect":
+                        detect_params = substep.get("parameters", {})
+                        detect_thresholds = substep.get("thresholds", {})
+                        break
+                
+                # Set QC parameters with fallbacks
+                mos_threshold = detect_thresholds.get("mos", 3.5)
+                wer_threshold = detect_thresholds.get("wer", 0.10)
+                whisperx_model = detect_params.get("model", "large-v2")
+                max_attempts = step_params.get("max_attempts", 3)
+                
+                # Create QC output directory
+                qc_output_dir = os.path.join(workspace_root, "02_qc_audio")
+                os.makedirs(qc_output_dir, exist_ok=True)
+                
+                logging.info(f"Starting QC step '{step_id}' with thresholds: MOS >= {mos_threshold}, WER <= {wer_threshold}")
+                
+                # Process each TTS manifest through QC
+                validated_manifests = []
+                qc_summary = {"total": 0, "passed": 0, "failed": 0, "fixed": 0}
+                
+                for idx, tts_manifest in enumerate(all_tts_manifests):
+                    try:
+                        tts_manifest_path = tts_manifest.get("manifest_path")
+                        if not tts_manifest_path:
+                            logging.warning(f"TTS manifest {idx+1} missing manifest_path. Skipping QC.")
+                            validated_manifests.append(tts_manifest)
+                            continue
+                            
+                        logging.info(f"Running QC for TTS manifest {idx+1}: {tts_manifest_path}")
+                        
+                        qc_result = core.wrappers.run_audio_qc(
+                            input_manifest=tts_manifest_path,
+                            output_dir=qc_output_dir,
+                            mos_threshold=mos_threshold,
+                            wer_threshold=wer_threshold,
+                            max_attempts=max_attempts,
+                            enable_transcription=True,
+                            whisperx_model=whisperx_model,
+                            step_id=step_id
+                        )
+                        
+                        # Update summary statistics
+                        summary = qc_result.get("summary", {})
+                        qc_summary["total"] += summary.get("chunks_processed", 0)
+                        qc_summary["passed"] += summary.get("chunks_passed", 0)
+                        qc_summary["failed"] += summary.get("chunks_failed", 0)
+                        qc_summary["fixed"] += summary.get("chunks_fixed", 0)
+                        
+                        # Add QC results to original TTS manifest
+                        validated_manifest = tts_manifest.copy()
+                        validated_manifest["qc_results"] = qc_result
+                        validated_manifest["qc_manifest_path"] = qc_result["manifest_path"]
+                        
+                        validated_manifests.append(validated_manifest)
+                        
+                        pass_rate = summary.get("pass_rate", 0.0)
+                        logging.info(f"QC completed for manifest {idx+1}: {pass_rate:.1%} pass rate")
+                        
+                    except RuntimeError as e:
+                        logging.error(f"QC failed for TTS manifest {idx+1}: {e}")
+                        # On QC failure, include original manifest but mark as failed
+                        failed_manifest = tts_manifest.copy()
+                        failed_manifest["qc_status"] = "failed"
+                        failed_manifest["qc_error"] = str(e)
+                        validated_manifests.append(failed_manifest)
+                    except Exception as e:
+                        logging.error(f"Unexpected error during QC for manifest {idx+1}: {e}", exc_info=True)
+                        failed_manifest = tts_manifest.copy()
+                        failed_manifest["qc_status"] = "error" 
+                        failed_manifest["qc_error"] = str(e)
+                        validated_manifests.append(failed_manifest)
+                
+                # Replace all_tts_manifests with QC-validated versions
+                all_tts_manifests = validated_manifests
+                
+                # Log overall QC summary
+                total_chunks = qc_summary["total"]
+                if total_chunks > 0:
+                    overall_pass_rate = qc_summary["passed"] / total_chunks
+                    logging.info(f"QC step '{step_id}' completed:")
+                    logging.info(f"  Total chunks: {total_chunks}")
+                    logging.info(f"  Passed: {qc_summary['passed']} ({overall_pass_rate:.1%})")
+                    logging.info(f"  Failed: {qc_summary['failed']}")
+                    logging.info(f"  Fixed: {qc_summary['fixed']}")
+                    
+                    # Warn if pass rate is low
+                    if overall_pass_rate < 0.8:
+                        logging.warning(f"QC pass rate ({overall_pass_rate:.1%}) is below 80%. Consider reviewing TTS settings.")
+                else:
+                    logging.warning("No audio chunks processed during QC step.")
+
             elif step_id == "apply_rvc":
                 if 'all_tts_manifests' not in locals() or not all_tts_manifests:
                     logging.warning(f"Skipping RVC step '{step_id}': No TTS manifests available from previous steps.")

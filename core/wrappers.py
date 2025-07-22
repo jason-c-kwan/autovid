@@ -854,3 +854,67 @@ def sync_video(video_path: str,
         except OSError:
             pass
         raise RuntimeError(f"Video synchronization failed: {e.stderr}") from e
+
+
+def run_audio_qc(
+    input_manifest: str,
+    output_dir: str,
+    mos_threshold: float = 3.5,
+    wer_threshold: float = 0.10,
+    max_attempts: int = 3,
+    enable_transcription: bool = True,
+    whisperx_model: str = "large-v2",
+    step_id: str = "qc_pronounce"
+) -> Dict[str, Any]:
+    """
+    Quality control wrapper for TTS audio validation.
+    
+    Args:
+        input_manifest: Path to TTS audio manifest JSON
+        output_dir: Output directory for QC results  
+        mos_threshold: Minimum MOS score threshold
+        wer_threshold: Maximum WER threshold
+        max_attempts: Maximum re-synthesis attempts
+        enable_transcription: Enable WhisperX transcription for WER
+        whisperx_model: WhisperX model for transcription
+        step_id: Step identifier
+        
+    Returns:
+        Dict: QC results manifest
+        
+    Raises:
+        RuntimeError: If QC processing fails
+    """
+    import json
+    
+    cmd = [
+        sys.executable, "cli/qc_audio.py",
+        "--input", input_manifest,
+        "--output", output_dir,
+        "--mos-threshold", str(mos_threshold),
+        "--wer-threshold", str(wer_threshold),
+        "--max-attempts", str(max_attempts),
+        "--whisperx-model", whisperx_model,
+        "--step-id", step_id
+    ]
+    
+    if enable_transcription:
+        cmd.append("--enable-transcription")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        # Load and return QC manifest
+        manifest_stem = Path(input_manifest).stem
+        qc_manifest_path = Path(output_dir) / f"qc_manifest_{manifest_stem}.json"
+        
+        if qc_manifest_path.exists():
+            with open(qc_manifest_path, 'r') as f:
+                qc_manifest = json.load(f)
+                qc_manifest["manifest_path"] = str(qc_manifest_path)
+                return qc_manifest
+        else:
+            raise RuntimeError(f"QC manifest not found: {qc_manifest_path}")
+            
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Audio QC failed: {e.stderr}") from e
