@@ -18,3 +18,7 @@ numpy==1.23.4
 scipy==1.10.1
 pybind11==2.11.1
 git+https://github.com/aliutkus/speechmetrics@master#egg=speechmetrics[gpu]
+soundfile
+librosa
+torch
+faiss-cpu

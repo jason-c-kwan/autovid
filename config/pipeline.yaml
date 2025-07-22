@@ -58,6 +58,35 @@ video_sync:
   preview_clips: false            # create preview clips for manual verification
   max_sync_offset: 0.5            # maximum allowed sync offset before error (seconds)
 
+# --- Slide Synchronization Configuration ------------------
+slide_sync:
+  keynote_delay: 1.0              # keynote export delay compensation in seconds
+  assembly_method: standard       # assembly method (standard, complex)
+  optimize_gaps: true             # optimize gap types based on content analysis
+  temp_dir: workspace/slide_sync  # temporary directory for processing
+  gap_types:                      # gap filler configuration
+    static_hold:                  # static frame hold
+      enabled: true
+      max_duration: 10.0          # maximum static hold duration in seconds
+    animated_hold:                # animated loop hold  
+      enabled: true
+      loop_duration: 2.0          # duration of animation to loop
+      max_loops: 5                # maximum number of loops
+    fade_hold:                    # fade to static hold
+      enabled: true
+      fade_duration: 1.0          # fade transition duration
+      fade_type: in               # fade type (in, out, inout)
+  validation:
+    max_gap_duration: 15.0        # maximum allowed gap duration
+    max_timing_expansion: 100.0   # maximum timing expansion percentage
+    warn_gap_threshold: 5.0       # gap duration to trigger warning
+  output_settings:
+    video_codec: libx264          # video codec for assembly
+    audio_codec: aac              # audio codec for assembly  
+    pixel_format: yuv420p         # pixel format
+    crf: 23                       # constant rate factor for quality
+    preset: medium                # encoding preset
+
 # --- Pronunciation & QC -----------------------------------
 pronun_csv:      config/pronunciations.csv
 qc_threshold:    0.85          # cosine similarity score to accept a chunk
@@ -97,5 +126,9 @@ steps:
       movement_threshold: 0.1
       keynote_delay: 1.0
       validate_transitions: true
-  - id: sync_video
+  - id: sync_slides
+    parameters:
+      assembly_method: standard
+      optimize_gaps: true
+      create_preview: false
   - id: make_srt

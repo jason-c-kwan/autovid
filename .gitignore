@@ -30,3 +30,13 @@ autogen/__pycache__/
 cli/__pycache__/
 tests/__pycache__/
 *.pyc
+
+# Ignore RVC pretrained models (auto-downloaded)
+third_party/Mangio-RVC-Fork/hubert_base.pt
+third_party/Mangio-RVC-Fork/rmvpe.pt
+third_party/Mangio-RVC-Fork/*.pt
+
+# Ignore temporary audio outputs
+tts_audio_output/
+**/rvc_test*/
+**/03_rvc_*/
