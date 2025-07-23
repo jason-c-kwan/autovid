@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AutoVid Scene Detection Configuration Schema",  
+  "description": "Schema for validating AutoVid scene detection configuration files",
+  "type": "object",
+  "required": ["algorithms", "keynote_optimizations"],
+  "properties": {
+    "algorithms": {
+      "type": "object",
+      "required": ["ffmpeg_scene", "static_detection", "content_analysis"],
+      "properties": {
+        "ffmpeg_scene": {
+          "type": "object",
+          "required": ["enabled", "threshold", "weight"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "description": {"type": "string"},
+            "threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "min_scene_len": {"type": "number", "minimum": 0.0},
+            "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+          }
+        },
+        "static_detection": {
+          "type": "object", 
+          "required": ["enabled", "static_threshold", "weight"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "description": {"type": "string"},
+            "static_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "min_static_duration": {"type": "number", "minimum": 0.0},
+            "max_static_duration": {"type": "number", "minimum": 0.0},
+            "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+          }
+        },
+        "content_analysis": {
+          "type": "object",
+          "required": ["enabled", "threshold", "weight"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "description": {"type": "string"},
+            "histogram_bins": {"type": "integer", "minimum": 8, "maximum": 1024},
+            "comparison_method": {
+              "type": "string",
+              "enum": ["correlation", "chi_square", "intersection", "bhattacharyya"]
+            },
+            "threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "grid_analysis": {"type": "boolean"},
+            "grid_size": {
+              "type": "array",
+              "items": {"type": "integer", "minimum": 1},
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+          }
+        }
+      }
+    },
+    "keynote_optimizations": {
+      "type": "object",
+      "required": ["delay_compensation", "presentation_mode"],
+      "properties": {
+        "delay_compensation": {"type": "number", "minimum": 0.0, "maximum": 10.0},
+        "presentation_mode": {"type": "boolean"},
+        "slide_characteristics": {
+          "type": "object",
+          "properties": {
+            "typical_duration": {
+              "type": "array",
+              "items": {"type": "number", "minimum": 0.0},
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "min_slide_duration": {"type": "number", "minimum": 0.0},
+            "max_slide_duration": {"type": "number", "minimum": 0.0}
+          }
+        },
+        "animation_detection": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "animation_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "ignore_minor_animations": {"type": "boolean"},
+            "animation_duration_limit": {"type": "number", "minimum": 0.0}
+          }
+        }
+      }
+    },
+    "ensemble": {
+      "type": "object",
+      "properties": {
+        "decision_method": {
+          "type": "string",
+          "enum": ["weighted_average", "majority_vote", "confidence_based"]
+        },
+        "confidence_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "temporal_consistency": {"type": "boolean"}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "transcript_validation": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "cue_token": {"type": "string"},
+            "tolerance_range": {
+              "type": "array",
+              "items": {"type": "number", "minimum": 0.0},
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "auto_adjustment": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "max_iterations": {"type": "integer", "minimum": 1},
+            "adjustment_step": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "convergence_tolerance": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+          }
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "properties": {
+        "frame_sampling": {"type": "integer", "minimum": 1},
+        "parallel_processing": {"type": "boolean"},
+        "max_workers": {"type": "integer", "minimum": 1},
+        "gpu_acceleration": {"type": "boolean"}
+      }
+    }
+  }
+}

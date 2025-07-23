@@ -35,7 +35,7 @@ audio_splicing:
 # --- Video Analysis Configuration -------------------------
 video_analysis:
   scene_threshold: 0.1            # scene detection sensitivity (0.0-1.0, lower = more sensitive for Keynote)
-  movement_threshold: 0.1         # movement detection sensitivity (0.0-1.0)
+  movement_threshold: 0.05        # movement detection sensitivity (0.0-1.0)
   keynote_delay: 1.0              # keynote export delay compensation in seconds
   min_scene_duration: 0.5         # minimum duration between scenes in seconds
   validate_transitions: true      # validate against transcript transition cues
@@ -47,11 +47,43 @@ video_analysis:
   enable_static_detection: true   # detect 1-second static periods before transitions
   enable_content_analysis: true   # histogram-based content change detection
   
-  # Advanced tuning
+  # Multi-algorithm detection configuration
+  algorithms:
+    sensitive_scene:
+      enabled: true
+      threshold: 0.05             # Ultra-sensitive scene detection
+      weight: 0.4                 # Algorithm weight in final decision
+    
+    static_detection:
+      enabled: true
+      pause_duration: 1.0         # Detect 1-second static periods
+      frame_similarity_threshold: 0.95 # Similarity threshold for static frames
+      weight: 0.3
+    
+    content_analysis:
+      enabled: true
+      histogram_threshold: 0.15   # Histogram-based content change detection
+      grid_size: [4, 4]           # Grid for localized analysis
+      weight: 0.3
+  
+  # Advanced detection features
+  detect_animations: true         # Detect in-slide animations vs transitions
+  animation_sensitivity: 0.8      # Threshold for animation vs scene change
+  frame_sampling: 2               # Analyze every Nth frame for speed
+  parallel_processing: true       # Enable parallel scene detection
+  cache_frame_analysis: true      # Cache frame analysis results
+  
+  # Validation and auto-adjustment
+  expected_cue_token: "[transition]" # Token to count in transcript
+  validation_tolerance: [0.7, 1.3]  # acceptable range for scene count validation
+  auto_adjust_threshold: true     # Auto-adjust if validation fails
+  adjustment_step: 0.02           # Threshold adjustment increment
+  max_adjustments: 5              # Maximum auto-adjustments
+  
+  # Legacy parameters (maintained for compatibility)
   static_period_duration: 1.0     # duration for static period detection (seconds)
   content_threshold_multiplier: 1.5  # multiplier for content detection threshold
   merge_tolerance: 0.5            # time tolerance for merging similar detections (seconds)
-  validation_tolerance: [0.7, 1.3]  # acceptable range for scene count validation
 
 # --- Video Synchronization Configuration ------------------
 video_sync:
@@ -73,25 +105,79 @@ video_sync:
 # --- Slide Synchronization Configuration ------------------
 slide_sync:
   keynote_delay: 1.0              # keynote export delay compensation in seconds
-  assembly_method: standard       # assembly method (standard, complex)
-  optimize_gaps: true             # optimize gap types based on content analysis
+  assembly_method: intelligent    # Primary sync strategy
+  optimize_gaps: true             # optimize gap handling
   temp_dir: workspace/slide_sync  # temporary directory for processing
-  gap_types:                      # gap filler configuration
-    static_hold:                  # static frame hold
-      enabled: true
-      max_duration: 10.0          # maximum static hold duration in seconds
-    animated_hold:                # animated loop hold  
-      enabled: true
-      loop_duration: 2.0          # duration of animation to loop
-      max_loops: 5                # maximum number of loops
-    fade_hold:                    # fade to static hold
-      enabled: true
-      fade_duration: 1.0          # fade transition duration
-      fade_type: in               # fade type (in, out, inout)
+  
+  # Fallback strategies (ordered by preference)
+  fallback_strategies:
+    - transcript_guided           # Use transcript slide numbers and cues
+    - duration_based              # Use audio duration estimates
+    - interpolated                # Linear interpolation of timing
+    - manual_mapping              # Manual override (future feature)
+  
+  # Validation thresholds
   validation:
-    max_gap_duration: 15.0        # maximum allowed gap duration
-    max_timing_expansion: 100.0   # maximum timing expansion percentage
-    warn_gap_threshold: 5.0       # gap duration to trigger warning
+    require_audio_chunks: true    # Fail if no audio chunks available
+    min_scene_ratio: 0.3          # Minimum ratio of scenes to audio chunks
+    max_scene_ratio: 3.0          # Maximum ratio of scenes to audio chunks
+    max_timing_drift: 5.0         # Maximum timing drift (seconds)
+    warn_threshold: 1.5           # Ratio threshold for warnings
+    max_gap_duration: 15.0        # Maximum allowed gap duration
+    max_timing_expansion: 100.0   # Maximum timing expansion percentage
+    warn_gap_threshold: 5.0       # Gap duration to trigger warning
+  
+  # Mapping strategies
+  mapping_strategies:
+    direct:                       # 1:1 scene to audio mapping
+      enabled: true
+      priority: 1                 # Highest priority when counts match
+    
+    transcript_guided:            # Use transcript slide numbers
+      enabled: true
+      priority: 2
+      slide_number_key: "slide_number" # Key in transcript manifest
+      interpolate_missing: true   # Interpolate timing for missing slides
+    
+    duration_based:               # Distribute audio evenly across scenes
+      enabled: true
+      priority: 3
+      preserve_gaps: true         # Maintain original gap structure
+      min_segment_duration: 0.5   # Minimum segment duration
+    
+    interpolated:                 # Linear time interpolation
+      enabled: true
+      priority: 4                 # Lowest priority (fallback)       
+      smooth_transitions: true    # Apply smoothing to transitions
+  
+  # Gap handling configuration
+  gap_handling:
+    default_gap_type: static_hold # Default gap type
+    max_gap_duration: 10.0        # Maximum allowed gap duration
+    
+    gap_types:
+      static_hold:                # Hold last frame
+        enabled: true
+        max_duration: 10.0
+        fade_edges: true          # Fade at gap edges
+        
+      animated_loop:              # Loop video segment
+        enabled: true
+        loop_duration: 2.0
+        max_loops: 5
+        smooth_loop: true
+        
+      fade_transition:            # Fade between scenes
+        enabled: true
+        fade_duration: 1.0
+        fade_type: crossfade       # Options: crossfade, fade_to_black
+  
+  # Processing settings
+  preserve_intermediates: false   # Keep intermediate files for debugging
+  parallel_processing: true       # Process segments in parallel
+  max_workers: 4                  # Maximum parallel workers
+  
+  # Output settings
   output_settings:
     video_codec: libx264          # video codec for assembly
     audio_codec: aac              # audio codec for assembly  
@@ -116,32 +202,77 @@ steps:
       orpheus_model:          canopylabs/orpheus-tts-0.1-finetune-prod
       orpheus_voice:          dan
       orpheus_temperature:    0.2
+      # Token limit handling to prevent word cutoffs
+      max_tokens_per_chunk:   512     # Reduced from 768 to prevent cutoffs
+      enable_sentence_splitting: true # Split long text at sentence boundaries
+      overlap_tokens:         50      # Overlap tokens between chunks for continuity
+      chunk_strategy:         smart_split # Options: smart_split, hard_limit, sentence_boundary
   - id: qc_pronounce
-    substeps:
-      - id: qc_pronounce_detect
-        parameters:
-          model: large-v3
-        thresholds:
-          wer: 0.10
-          mos: 3.5
-      - id: pronounce_fix
-        parameters:
-          max_attempts: 3
-          phoneme_hint:
-            piper: xsampa
-            orpheus: ssml_ipa
+    parameters:
+      # Detection thresholds
+      mos_threshold: 3.5                 # Minimum Mean Opinion Score
+      wer_threshold: 0.10                # Maximum Word Error Rate
+      max_attempts: 3                    # Maximum re-synthesis attempts
+      
+      # Transcription settings
+      whisper_model: large-v3            # WhisperX model for transcription
+      enable_transcription: true         # Enable WER-based quality checks
+      transcription_timeout: 30          # Timeout for transcription in seconds
+      
+      # Re-synthesis strategy
+      retry_with_phonemes: true          # Use phoneme hints for failed chunks
+      retry_different_engine: true       # Try alternate TTS engine if available
+      preserve_original_on_failure: false # Keep original audio if all retries fail
+      
+      # Advanced QC features
+      detect_clipping: true              # Detect audio clipping
+      detect_silence: true               # Detect unexpected silence periods
+      silence_threshold: -40             # dB threshold for silence detection
+      min_chunk_duration: 0.5            # Minimum expected chunk duration (seconds)
+      max_chunk_duration: 30.0           # Maximum expected chunk duration (seconds)
   - id: apply_rvc
   - id: splice_audio
   - id: analyze_video
     parameters:
-      scene_threshold: 0.1          # more sensitive for slide transitions
-      movement_threshold: 0.1
-      keynote_delay: 1.0
-      validate_transitions: true
-      presentation_mode: true       # enable Keynote-optimized detection
+      scene_threshold: 0.1              # More sensitive for slide transitions
+      movement_threshold: 0.05          # More sensitive for subtle animations
+      keynote_delay: 1.0                # Keynote export delay compensation
+      validate_transitions: true        # Validate against transcript cues
+      presentation_mode: true           # Enable Keynote-optimized detection
+      
+      # Multi-algorithm detection
+      enable_multi_algorithm: true      # Use multiple detection methods
+      enable_static_detection: true     # Detect 1-second static periods
+      enable_content_analysis: true     # Histogram-based content detection
+      
+      # Validation settings
+      expected_cue_token: "[transition]" # Token to count in transcript
+      validation_tolerance: [0.7, 1.3]  # Acceptable ratio range (detected/expected)
+      auto_adjust_threshold: true       # Auto-adjust if validation fails
+      adjustment_step: 0.02             # Threshold adjustment increment
+      max_adjustments: 5                # Maximum auto-adjustments
   - id: sync_slides
     parameters:
-      assembly_method: standard
+      assembly_method: intelligent    # Primary sync strategy
       optimize_gaps: true
       create_preview: false
+      
+      # Enhanced validation parameters
+      validation:
+        require_audio_chunks: true
+        min_scene_ratio: 0.3          # Minimum ratio of scenes to audio chunks
+        max_scene_ratio: 3.0          # Maximum ratio of scenes to audio chunks
+        max_timing_drift: 5.0         # Maximum timing drift (seconds)
+        warn_threshold: 1.5           # Ratio threshold for warnings
+      
+      # Fallback strategies (ordered by preference)
+      fallback_strategies:
+        - transcript_guided           # Use transcript slide numbers and cues
+        - duration_based              # Use audio duration estimates
+        - interpolated                # Linear interpolation of timing
+      
+      # Gap handling options
+      gap_handling:
+        default_gap_type: static_hold # Default gap type
+        max_gap_duration: 10.0        # Maximum allowed gap duration
   - id: make_srt

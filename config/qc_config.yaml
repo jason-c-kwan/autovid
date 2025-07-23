@@ -1,0 +1,186 @@
+# Audio Quality Control Configuration for AutoVid Pipeline
+# This file contains detailed configuration for audio quality assessment and improvement
+
+# Quality thresholds for different aspects of audio quality
+quality_thresholds:
+  mos:
+    minimum: 3.5                        # Minimum acceptable MOS score
+    target: 4.0                         # Target MOS score for high quality
+    excellent: 4.5                      # Threshold for excellent quality
+    
+  wer:
+    maximum: 0.10                       # Maximum acceptable Word Error Rate
+    target: 0.05                        # Target WER for high accuracy
+    excellent: 0.02                     # Threshold for excellent accuracy
+    
+  duration:
+    min_chunk: 0.3                      # Minimum chunk duration (seconds)
+    max_chunk: 30.0                     # Maximum chunk duration (seconds)
+    silence_threshold: -40              # dB threshold for silence detection
+    
+  audio_quality:
+    max_clipping: 0.01                  # Maximum allowed clipping percentage
+    min_rms: -50                        # Minimum RMS level (dB)
+    max_rms: -6                         # Maximum RMS level (dB)
+    dynamic_range_min: 10               # Minimum dynamic range (dB)
+
+# Transcription configuration for WER calculation
+transcription:
+  whisper:
+    model: large-v3                     # WhisperX model for transcription
+    language: auto                      # Auto-detect language (or specify: en, es, fr, etc.)
+    device: cuda                        # Processing device (cuda or cpu)
+    batch_size: 16                      # Batch size for processing
+    compute_type: float16               # Compute type (float16, float32, int8)
+    
+  alignment:
+    model: WAV2VEC2_ASR_LARGE_LV60K_960H # Model for forced alignment
+    return_char_alignments: false       # Return character-level alignments
+    interpolate_method: nearest         # Interpolation method for alignment
+    
+  preprocessing:
+    normalize_audio: true               # Normalize audio before transcription
+    remove_silence: false               # Remove silence periods
+    apply_vad: true                     # Apply voice activity detection
+
+# Retry strategies for failed audio chunks
+retry_strategies:
+  max_attempts: 3                       # Maximum retry attempts per chunk
+  
+  strategies:
+    - name: parameter_adjustment        # Adjust TTS parameters
+      enabled: true
+      priority: 1                       # Highest priority strategy
+      adjustments:
+        temperature: [-0.1, 0.0, +0.1]  # Temperature adjustment values to try
+        top_p: [-0.05, 0.0, +0.05]     # Top-p adjustment values to try
+        repetition_penalty: [0.95, 1.0, 1.05] # Repetition penalty adjustments
+        
+    - name: text_preprocessing          # Modify input text
+      enabled: true
+      priority: 2
+      methods:
+        - add_punctuation               # Add missing punctuation
+        - phoneme_hints                 # Add phoneme pronunciation hints
+        - speed_markers                 # Add speech speed markers (<prosody rate="slow">)
+        - context_padding               # Add context from adjacent chunks
+        
+    - name: engine_fallback             # Try alternate TTS engines
+      enabled: true
+      priority: 3
+      fallback_order:                   # Try engines in this order
+        - orpheus                       # Primary: Orpheus TTS
+        - piper                         # Fallback: Piper TTS
+        
+    - name: chunk_splitting             # Split problematic chunks
+      enabled: true
+      priority: 4                       # Last resort strategy
+      split_methods:
+        - sentence_boundary             # Split at sentence boundaries
+        - phrase_boundary               # Split at phrase boundaries  
+        - word_boundary                 # Split at word boundaries (last resort)
+      min_split_length: 10              # Minimum words per split chunk
+      overlap_words: 2                  # Word overlap between split chunks
+
+# Phoneme correction and pronunciation hints
+phoneme_correction:
+  enabled: true
+  correction_sources:
+    - config/pronunciations.csv        # Custom pronunciation dictionary
+    - cmudict                          # CMU pronunciation dictionary
+    - epitran                          # Epitran multilingual phoneme conversion
+    
+  correction_strategies:
+    - ssml_phonemes                    # SSML phoneme markup (<phoneme alphabet="ipa" ph="...">)
+    - respelling                       # Phonetic respelling (e.g., "eye-ther" for "either")
+    - context_hints                    # Context-based pronunciation hints
+    
+  phoneme_alphabets:
+    orpheus: ipa                       # Use IPA for Orpheus TTS
+    piper: xsampa                      # Use X-SAMPA for Piper TTS
+
+# MOS (Mean Opinion Score) calculation settings
+mos_calculation:
+  model: nisqa                         # MOS prediction model (nisqa, dnsmos, speechmetrics)
+  batch_processing: true               # Process multiple files in batches
+  normalize_scores: true               # Normalize scores to 1-5 scale
+  confidence_threshold: 0.8            # Minimum confidence for score acceptance
+  
+  # Alternative MOS models (fallbacks)
+  fallback_models:
+    - dnsmos                           # Microsoft DNS-MOS
+    - speechmetrics                    # SpeechMetrics library
+
+# WER (Word Error Rate) calculation settings  
+wer_calculation:
+  case_sensitive: false                # Case-sensitive comparison
+  ignore_punctuation: true             # Ignore punctuation in comparison
+  normalize_text: true                 # Normalize text (expand contractions, etc.)
+  
+  # Text normalization options
+  normalization:
+    expand_contractions: true          # "don't" -> "do not"
+    remove_filler_words: false         # Remove "um", "uh", etc.
+    normalize_numbers: true            # "2" -> "two"
+    normalize_currency: true           # "$5" -> "five dollars"
+
+# Detection of specific audio issues
+issue_detection:
+  clipping:
+    enabled: true
+    threshold: 0.95                    # Amplitude threshold for clipping detection
+    min_duration: 0.01                 # Minimum duration to consider clipping (seconds)
+    
+  silence:
+    enabled: true
+    threshold: -40                     # dB threshold for silence
+    max_duration: 1.0                  # Maximum acceptable silence duration (seconds)
+    
+  noise:
+    enabled: true
+    snr_threshold: 20                  # Minimum signal-to-noise ratio (dB)
+    spectral_analysis: true            # Enable spectral noise analysis
+    
+  artifacts:
+    enabled: true
+    detect_pops: true                  # Detect audio pops/clicks
+    detect_distortion: true            # Detect harmonic distortion
+    spectral_anomaly_threshold: 0.3    # Threshold for spectral anomaly detection
+
+# Reporting and logging configuration
+reporting:
+  detailed_logs: true                  # Enable detailed logging
+  save_failed_chunks: true             # Save failed chunks for manual review
+  generate_reports: true               # Generate HTML/JSON quality reports
+  
+  report_formats:
+    - json                             # JSON format for programmatic use
+    - html                             # HTML format for human review
+    - csv                              # CSV format for spreadsheet analysis
+    
+  metrics_to_report:
+    - mos_score                        # Mean Opinion Score
+    - wer_score                        # Word Error Rate
+    - duration                         # Chunk duration
+    - snr                              # Signal-to-noise ratio
+    - spectral_centroid                # Spectral centroid (brightness)
+    - zero_crossing_rate               # Zero crossing rate (roughness indicator)
+
+# Performance and optimization settings
+performance:
+  parallel_processing: true            # Enable parallel processing
+  max_workers: 4                       # Maximum parallel workers
+  gpu_acceleration: true               # Use GPU when available
+  memory_limit: "8G"                   # Memory limit for processing
+  
+  # Caching configuration
+  cache:
+    enabled: true                      # Enable result caching
+    cache_dir: workspace/qc_cache      # Cache directory
+    cache_duration: 86400              # Cache validity (seconds, 24 hours)
+    
+  # Timeout settings
+  timeouts:
+    transcription: 30                  # Transcription timeout (seconds)
+    mos_calculation: 10                # MOS calculation timeout (seconds)
+    retry_attempt: 60                  # Per-retry timeout (seconds)

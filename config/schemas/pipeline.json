@@ -1,0 +1,249 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AutoVid Pipeline Configuration Schema",
+  "description": "Schema for validating AutoVid pipeline.yaml configuration files",
+  "type": "object",
+  "required": ["data_dir", "model_dir", "workspace_root", "steps"],
+  "properties": {
+    "data_dir": {
+      "type": "string",
+      "description": "Directory containing input data files"
+    },
+    "video_dir": {
+      "type": "string",
+      "description": "Directory containing video files"
+    },
+    "model_dir": {
+      "type": "string",
+      "description": "Directory containing model files"
+    },
+    "workspace_root": {
+      "type": "string",
+      "description": "Root directory for workspace files"
+    },
+    "tts_model_dir": {
+      "type": "string",
+      "description": "Directory for TTS model files"
+    },
+    "rvc_model_path": {
+      "type": "string",
+      "description": "Path to RVC model file"
+    },
+    "gpu_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "GPU index to use for processing"
+    },
+    "chunk_seconds": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 60,
+      "description": "Chunk duration in seconds for TTS processing"
+    },
+    "rvc": {
+      "type": "object",
+      "properties": {
+        "executable": {
+          "type": "string"
+        },
+        "model_path": {
+          "type": "string"
+        },
+        "index_path": {
+          "type": "string"
+        },
+        "f0_up_key": {
+          "type": "integer",
+          "minimum": -24,
+          "maximum": 24
+        },
+        "f0_method": {
+          "type": "string",
+          "enum": ["harvest", "pm", "crepe", "rmvpe"]
+        },
+        "index_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "device": {
+          "type": "string",
+          "pattern": "^(cpu|cuda:\\d+)$"
+        },
+        "is_half": {
+          "type": "boolean"
+        },
+        "filter_radius": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "resample_sr": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rms_mix_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "protect": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "crepe_hop_length": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "audio_splicing": {
+      "type": "object",
+      "properties": {
+        "crossfade_duration": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 5.0
+        },
+        "target_db": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 0
+        },
+        "normalize": {
+          "type": "boolean"
+        }
+      }
+    },
+    "video_analysis": {
+      "type": "object",
+      "properties": {
+        "scene_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "movement_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "keynote_delay": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 10.0
+        },
+        "min_scene_duration": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 10.0
+        },
+        "validate_transitions": {
+          "type": "boolean"
+        },
+        "presentation_mode": {
+          "type": "boolean"
+        },
+        "enable_multi_algorithm": {
+          "type": "boolean"
+        },
+        "algorithms": {
+          "type": "object",
+          "properties": {
+            "sensitive_scene": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+              }
+            },
+            "static_detection": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "pause_duration": {"type": "number", "minimum": 0.0},
+                "frame_similarity_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+              }
+            },
+            "content_analysis": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "histogram_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "grid_size": {
+                  "type": "array",
+                  "items": {"type": "integer", "minimum": 1},
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+              }
+            }
+          }
+        }
+      }
+    },
+    "slide_sync": {
+      "type": "object",
+      "properties": {
+        "keynote_delay": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 10.0
+        },
+        "assembly_method": {
+          "type": "string",
+          "enum": ["intelligent", "direct", "transcript_guided", "interpolated"]
+        },
+        "optimize_gaps": {
+          "type": "boolean"
+        },
+        "fallback_strategies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["transcript_guided", "duration_based", "interpolated", "manual_mapping"]
+          }
+        },
+        "validation": {
+          "type": "object",
+          "properties": {
+            "require_audio_chunks": {"type": "boolean"},
+            "min_scene_ratio": {"type": "number", "minimum": 0.0},
+            "max_scene_ratio": {"type": "number", "minimum": 0.0},
+            "max_timing_drift": {"type": "number", "minimum": 0.0}
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "check_datasets",
+              "extract_transcript", 
+              "tts_run",
+              "qc_pronounce",
+              "apply_rvc",
+              "splice_audio",
+              "analyze_video",
+              "sync_slides",
+              "make_srt"
+            ]
+          },
+          "parameters": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

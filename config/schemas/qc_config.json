@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AutoVid Quality Control Configuration Schema",
+  "description": "Schema for validating AutoVid QC configuration files",
+  "type": "object",
+  "required": ["quality_thresholds", "transcription", "retry_strategies"],
+  "properties": {
+    "quality_thresholds": {
+      "type": "object",
+      "required": ["mos", "wer", "duration", "audio_quality"],
+      "properties": {
+        "mos": {
+          "type": "object",
+          "properties": {
+            "minimum": {"type": "number", "minimum": 1.0, "maximum": 5.0},
+            "target": {"type": "number", "minimum": 1.0, "maximum": 5.0},
+            "excellent": {"type": "number", "minimum": 1.0, "maximum": 5.0}
+          }
+        },
+        "wer": {
+          "type": "object",
+          "properties": {
+            "maximum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "target": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "excellent": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+          }
+        },
+        "duration": {
+          "type": "object",
+          "properties": {
+            "min_chunk": {"type": "number", "minimum": 0.0},
+            "max_chunk": {"type": "number", "minimum": 0.0},
+            "silence_threshold": {"type": "number", "maximum": 0}
+          }
+        },
+        "audio_quality": {
+          "type": "object",
+          "properties": {
+            "max_clipping": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "min_rms": {"type": "number", "maximum": 0},
+            "max_rms": {"type": "number", "maximum": 0},
+            "dynamic_range_min": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "transcription": {
+      "type": "object",
+      "required": ["whisper", "alignment"],
+      "properties": {
+        "whisper": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "enum": ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]
+            },
+            "language": {"type": "string"},
+            "device": {
+              "type": "string",
+              "enum": ["cpu", "cuda"]
+            },
+            "batch_size": {"type": "integer", "minimum": 1},
+            "compute_type": {
+              "type": "string",
+              "enum": ["float16", "float32", "int8"]
+            }
+          }
+        },
+        "alignment": {
+          "type": "object",
+          "properties": {
+            "model": {"type": "string"},
+            "return_char_alignments": {"type": "boolean"},
+            "interpolate_method": {"type": "string"}
+          }
+        }
+      }
+    },
+    "retry_strategies": {
+      "type": "object",
+      "required": ["max_attempts", "strategies"],
+      "properties": {
+        "max_attempts": {"type": "integer", "minimum": 1, "maximum": 10},
+        "strategies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "enabled", "priority"],
+            "properties": {
+              "name": {"type": "string"},
+              "enabled": {"type": "boolean"},
+              "priority": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    "phoneme_correction": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "correction_sources": {
+          "type": "array", 
+          "items": {"type": "string"}
+        },
+        "correction_strategies": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "properties": {
+        "parallel_processing": {"type": "boolean"},
+        "max_workers": {"type": "integer", "minimum": 1},
+        "gpu_acceleration": {"type": "boolean"},
+        "memory_limit": {"type": "string"}
+      }
+    }
+  }
+}

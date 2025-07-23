@@ -1,0 +1,173 @@
+# Scene Detection Configuration for AutoVid Pipeline
+# Specialized configuration for Keynote slide-only video scene detection
+
+# Algorithm definitions and configurations
+algorithms:
+  ffmpeg_scene:
+    enabled: true
+    description: "Standard FFmpeg scene detection with adjustable threshold"
+    threshold: 0.1                      # Scene change threshold (0.0-1.0, lower = more sensitive)
+    min_scene_len: 0.5                  # Minimum scene length (seconds)
+    weight: 0.3                         # Algorithm weight in ensemble decision
+    parameters:
+      pixel_format: rgb24               # Pixel format for analysis
+      frame_rate: null                  # Use original frame rate (null = auto)
+    
+  static_detection:
+    enabled: true
+    description: "Detect static frame periods (Keynote pause detection)"
+    static_threshold: 0.95              # Frame similarity threshold (0.0-1.0)
+    min_static_duration: 0.8            # Minimum static period (seconds)
+    max_static_duration: 2.0            # Maximum static period (seconds)
+    weight: 0.4                         # Algorithm weight in ensemble decision
+    parameters:
+      comparison_method: ssim           # Similarity method: ssim, mse, correlation
+      frame_sampling: 1                 # Sample every Nth frame
+      edge_threshold: 0.1               # Edge detection threshold for content analysis
+    
+  content_analysis:
+    enabled: true
+    description: "Histogram-based content change detection"
+    histogram_bins: 256                 # Histogram bins for analysis
+    comparison_method: correlation      # Comparison method: correlation, chi_square, intersection, bhattacharyya
+    threshold: 0.15                     # Content change threshold (0.0-1.0)
+    grid_analysis: true                 # Enable grid-based analysis
+    grid_size: [4, 4]                   # Grid dimensions for localized analysis
+    weight: 0.3                         # Algorithm weight in ensemble decision
+    parameters:
+      color_space: hsv                  # Color space for analysis: rgb, hsv, lab
+      normalize_histograms: true        # Normalize histograms before comparison
+      edge_enhancement: true            # Enhance edges before analysis
+
+# Keynote-specific optimizations
+keynote_optimizations:
+  delay_compensation: 1.0               # Keynote export delay (seconds)
+  presentation_mode: true               # Enable presentation-specific optimizations
+  
+  slide_characteristics:
+    typical_duration: [5, 30]           # Typical slide duration range (seconds)
+    min_slide_duration: 2.0             # Minimum expected slide duration
+    max_slide_duration: 120.0           # Maximum expected slide duration
+    
+    transition_patterns:
+      - instant_cut                     # Instant slide changes
+      - fade_transition                 # Fade between slides
+      - slide_animation                 # In-slide animations
+      - wipe_transition                 # Wipe/slide transitions
+      
+  animation_detection:
+    enabled: true
+    animation_threshold: 0.3            # Threshold for detecting animations vs transitions
+    ignore_minor_animations: true       # Ignore small UI animations (cursors, highlights)
+    animation_duration_limit: 3.0       # Maximum duration for in-slide animations (seconds)
+    
+    # Animation types to detect
+    animation_types:
+      bullet_points: true               # Bullet point reveals
+      object_entrance: true             # Object entrance animations  
+      slide_transitions: true           # Between-slide transitions
+      cursor_movement: false            # Cursor/pointer movement (usually ignored)
+
+# Ensemble decision making
+ensemble:
+  decision_method: weighted_average     # Decision method: weighted_average, majority_vote, confidence_based
+  confidence_threshold: 0.6             # Minimum confidence for scene detection
+  temporal_consistency: true            # Apply temporal consistency checking
+  consistency_window: 3                 # Window size for consistency checking (frames)
+  
+  # Post-processing filters
+  post_processing:
+    merge_close_scenes: true            # Merge scenes that are very close in time
+    merge_threshold: 0.5                # Time threshold for merging (seconds)
+    filter_short_scenes: true           # Filter out very short scenes
+    min_scene_duration: 0.5             # Minimum scene duration after filtering
+    
+    smooth_transitions: true            # Apply smoothing to transition timing
+    smoothing_window: 0.2               # Smoothing window size (seconds)
+
+# Validation against transcript expectations
+validation:
+  transcript_validation:
+    enabled: true
+    cue_token: "[transition]"           # Token to count in transcript
+    tolerance_range: [0.7, 1.3]        # Acceptable detection ratio range (detected/expected)
+    strict_mode: false                  # Strict mode requires exact match within tolerance
+    
+  auto_adjustment:
+    enabled: true
+    max_iterations: 5                   # Maximum auto-adjustment attempts
+    adjustment_step: 0.02               # Threshold adjustment increment
+    convergence_tolerance: 0.1          # Stop adjusting when within this tolerance
+    
+    # Adjustment strategies
+    strategies:
+      - decrease_threshold              # First try: make more sensitive
+      - increase_ensemble_weight        # Second try: adjust algorithm weights
+      - enable_fallback_detection       # Third try: enable additional detection methods
+    
+  quality_metrics:
+    confidence_scoring: true            # Enable confidence scoring for detections
+    temporal_consistency: true          # Check for temporal consistency
+    minimum_confidence: 0.7             # Minimum confidence for valid detection
+    report_low_confidence: true         # Report detections with low confidence
+
+# Performance optimization
+performance:
+  frame_sampling: 2                     # Analyze every Nth frame for speed (1 = all frames)
+  parallel_processing: true             # Enable parallel algorithm execution
+  max_workers: 4                        # Maximum parallel workers
+  
+  # Memory optimization
+  frame_cache_size: 100                 # Number of frames to cache in memory
+  batch_processing: true                # Process frames in batches
+  batch_size: 32                        # Frames per batch
+  
+  # GPU acceleration (if available)
+  gpu_acceleration: false               # Enable GPU acceleration (experimental)
+  gpu_memory_limit: 2048                # GPU memory limit (MB)
+
+# Output and debugging
+output:
+  debug_frames: false                   # Export debug frames for analysis
+  debug_output_dir: workspace/debug_frames # Directory for debug frames
+  
+  timing_analysis: true                 # Include detailed timing analysis
+  confidence_scores: true               # Include confidence scores in output
+  algorithm_breakdown: true             # Show results from each algorithm
+  
+  # Visualization options
+  create_visualization: false           # Create visual timeline of detections
+  visualization_format: html            # Format: html, png, svg
+  
+  # Detailed logging
+  log_level: info                       # Logging level: debug, info, warning, error
+  log_algorithm_details: true           # Log detailed algorithm execution info
+  save_intermediate_results: false      # Save intermediate results for debugging
+
+# Fallback and error handling
+fallback:
+  enable_simple_detection: true         # Fallback to simple threshold detection
+  simple_threshold: 0.3                 # Threshold for simple detection
+  
+  # Emergency fallbacks
+  uniform_distribution: true            # Last resort: distribute scenes uniformly
+  uniform_scene_count: 10               # Default scene count for uniform distribution
+  
+  # Error handling
+  continue_on_error: true               # Continue processing on non-fatal errors
+  max_retries: 3                        # Maximum retries for failed operations
+  retry_delay: 1.0                      # Delay between retries (seconds)
+
+# Advanced detection features
+advanced_features:
+  optical_flow: false                   # Enable optical flow analysis (experimental)
+  edge_detection: true                  # Enable edge-based detection
+  color_consistency: true               # Analyze color consistency across frames
+  
+  # Machine learning features (future)
+  ml_classification: false              # Enable ML-based scene classification
+  ml_model_path: models/scene_classifier.onnx # Path to ML model
+  
+  # Audio-visual correlation (if audio available)
+  audio_visual_sync: false              # Correlate with audio features
+  audio_onset_detection: false          # Detect audio onsets for scene boundaries
