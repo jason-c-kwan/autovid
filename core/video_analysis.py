@@ -15,6 +15,8 @@ from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 
+from . import config_loader
+
 try:
     import ffmpeg
 except ImportError:
@@ -462,11 +464,9 @@ def generate_timing_manifest(video_path: str,
 
 def detect_keynote_scenes(
     video_path: str,
-    expected_transitions: int = 0,
-    threshold: float = 0.1,
-    keynote_delay: float = 1.0,
-    presentation_mode: bool = True,
-    min_scene_duration: float = 0.5
+    expected_transitions: Optional[int] = None,
+    config_override: Optional[Dict] = None,
+    transcript_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Keynote-optimized scene detection combining multiple algorithms.
@@ -477,10 +477,8 @@ def detect_keynote_scenes(
     Args:
         video_path: Path to the video file
         expected_transitions: Expected number of transitions for validation
-        threshold: Base scene detection sensitivity (0.0-1.0, lower = more sensitive)
-        keynote_delay: Keynote export delay compensation in seconds
-        presentation_mode: Enable Keynote-specific optimizations
-        min_scene_duration: Minimum duration between scenes in seconds
+        config_override: Override configuration parameters
+        transcript_path: Optional path to transcript JSON for validation against [transition] cues
         
     Returns:
         Dictionary containing detected scenes and metadata
@@ -489,97 +487,268 @@ def detect_keynote_scenes(
         VideoAnalysisError: If all detection methods fail
     """
     try:
+        # Load configuration with overrides
+        config = config_loader.load_config()
+        video_config = config.get('video_analysis', {})
+        
+        # Apply overrides if provided
+        if config_override:
+            video_config = {**video_config, **config_override}
+        
+        # Extract configuration parameters with defaults
+        threshold = video_config.get('scene_threshold', 0.1)
+        keynote_delay = video_config.get('keynote_delay', 1.0)
+        presentation_mode = video_config.get('presentation_mode', True)
+        min_scene_duration = video_config.get('min_scene_duration', 0.5)
+        enable_multi_algorithm = video_config.get('enable_multi_algorithm', True)
+        enable_static_detection = video_config.get('enable_static_detection', True)
+        enable_content_analysis = video_config.get('enable_content_analysis', True)
+        
+        # Multi-algorithm configuration
+        algorithm_weights = video_config.get('algorithm_weights', {
+            'sensitive': 1.0,
+            'static': 1.2,
+            'content': 0.9
+        })
+        confidence_threshold = video_config.get('confidence_threshold', 0.5)
+        
         logger.info(f"Starting Keynote-optimized scene detection for {video_path}")
-        logger.info(f"Expected transitions: {expected_transitions}, threshold: {threshold}")
+        logger.info(f"Config: threshold={threshold}, keynote_delay={keynote_delay}, multi_algorithm={enable_multi_algorithm}")
+        if expected_transitions is not None:
+            logger.info(f"Expected transitions: {expected_transitions}")
         
         video_info = probe_video_info(video_path)
         frame_rate = video_info['frame_rate']
         duration = video_info['duration']
         
-        detection_results = []
+        # Use adaptive threshold detection if enabled and expected transitions are available
+        enable_adaptive = video_config.get('enable_adaptive_thresholds', True)
+        max_adaptive_attempts = video_config.get('max_adaptive_attempts', 3)
         
-        # Method 1: Ultra-sensitive FFmpeg scene detection
-        try:
-            logger.debug("Running ultra-sensitive scene detection")
-            scenes_method1 = _detect_scenes_sensitive(video_path, threshold=threshold)
-            detection_results.append(("sensitive", scenes_method1))
-            logger.info(f"Sensitive detection found {len(scenes_method1)} scenes")
-        except Exception as e:
-            logger.warning(f"Sensitive detection failed: {e}")
-        
-        # Method 2: Static period detection for 1-second pauses
-        if presentation_mode:
-            try:
-                logger.debug("Running static period detection")
-                scenes_method2 = _detect_static_transitions(video_path, pause_duration=1.0)
-                detection_results.append(("static", scenes_method2))
-                logger.info(f"Static detection found {len(scenes_method2)} transitions")
-            except Exception as e:
-                logger.warning(f"Static detection failed: {e}")
-        
-        # Method 3: Content-based detection with histogram comparison
-        try:
-            logger.debug("Running content-based detection")
-            scenes_method3 = _detect_content_changes(video_path, threshold=threshold * 1.5)
-            detection_results.append(("content", scenes_method3))
-            logger.info(f"Content detection found {len(scenes_method3)} scenes")
-        except Exception as e:
-            logger.warning(f"Content detection failed: {e}")
+        if enable_adaptive and expected_transitions and expected_transitions > 0:
+            logger.info("Using adaptive threshold detection")
+            detection_results, adaptive_validation = _detect_with_adaptive_thresholds(
+                video_path, video_config, expected_transitions, duration, max_adaptive_attempts
+            )
+        else:
+            # Fallback to manual detection
+            logger.info("Using manual threshold detection")
+            detection_results = []
+            
+            # Method 1: Ultra-sensitive FFmpeg scene detection
+            if enable_multi_algorithm:
+                try:
+                    logger.debug("Running ultra-sensitive scene detection")
+                    scenes_method1 = _detect_scenes_sensitive(video_path, threshold=threshold)
+                    detection_results.append(("sensitive", scenes_method1, algorithm_weights.get('sensitive', 1.0)))
+                    logger.info(f"Sensitive detection found {len(scenes_method1)} scenes")
+                except Exception as e:
+                    logger.warning(f"Sensitive detection failed: {e}")
+            
+            # Method 2: Static period detection for 1-second pauses
+            if presentation_mode and enable_static_detection:
+                try:
+                    logger.debug("Running static period detection")
+                    scenes_method2 = _detect_static_transitions(video_path, pause_duration=1.0)
+                    detection_results.append(("static", scenes_method2, algorithm_weights.get('static', 1.2)))
+                    logger.info(f"Static detection found {len(scenes_method2)} transitions")
+                except Exception as e:
+                    logger.warning(f"Static detection failed: {e}")
+            
+            # Method 3: Content-based detection with histogram comparison
+            if enable_content_analysis:
+                try:
+                    logger.debug("Running content-based detection")
+                    scenes_method3 = _detect_content_changes(video_path, threshold=threshold * 1.5)
+                    detection_results.append(("content", scenes_method3, algorithm_weights.get('content', 0.9)))
+                    logger.info(f"Content detection found {len(scenes_method3)} scenes")
+                except Exception as e:
+                    logger.warning(f"Content detection failed: {e}")
         
         if not detection_results:
             raise VideoAnalysisError("All scene detection methods failed")
         
-        # Combine and validate results
-        combined_scenes = _merge_scene_detections(
-            [scenes for _, scenes in detection_results], 
-            tolerance=min_scene_duration
+        # Calculate algorithm reliability and apply fallback strategies
+        reliability_scores = _calculate_algorithm_reliability(
+            detection_results, expected_transitions, duration
         )
+        logger.info(f"Algorithm reliability scores: {reliability_scores}")
+        
+        # Apply fallback strategies for unreliable algorithms
+        min_reliability = video_config.get('min_algorithm_reliability', 0.3)
+        detection_results = _apply_fallback_strategies(
+            detection_results, reliability_scores, min_reliability
+        )
+        
+        if not detection_results:
+            raise VideoAnalysisError("All detection algorithms failed reliability checks")
+        
+        # Combine and validate results using weighted voting
+        if enable_multi_algorithm and len(detection_results) > 1:
+            combined_scenes, scene_metadata = _merge_scene_detections_weighted(
+                detection_results, 
+                tolerance=min_scene_duration,
+                confidence_threshold=confidence_threshold
+            )
+        else:
+            # Fallback to simple merge for single algorithm
+            combined_scenes = _merge_scene_detections(
+                [scenes for _, scenes, _ in detection_results], 
+                tolerance=min_scene_duration
+            )
+            scene_metadata = [{'confidence': 0.8, 'methods': [method for method, _, _ in detection_results]} 
+                             for _ in combined_scenes]
         
         # Apply Keynote delay compensation
         adjusted_scenes = []
-        for timestamp in combined_scenes:
+        for i, timestamp in enumerate(combined_scenes):
             adjusted_timestamp = max(0, timestamp - keynote_delay)
             frame_number = int(adjusted_timestamp * frame_rate)
+            
+            # Get metadata for this scene if available
+            metadata = scene_metadata[i] if i < len(scene_metadata) else {}
+            
             adjusted_scenes.append({
                 'timestamp': adjusted_timestamp,
                 'original_timestamp': timestamp,
                 'frame_number': frame_number,
-                'confidence': 0.8,  # Combined confidence
+                'confidence': metadata.get('confidence', 0.8),
                 'slide_number': len(adjusted_scenes) + 1,
                 'scene_score': None,
                 'transition_type': 'keynote_optimized',
-                'detection_methods': [method for method, _ in detection_results]
+                'detection_methods': metadata.get('methods', [method for method, _, _ in detection_results]),
+                'method_count': metadata.get('method_count', len(detection_results)),
+                'total_weight': metadata.get('total_weight', 0)
             })
         
-        # Validate against expected count
+        # Validate against expected count and transcript cues
         validation_result = _validate_scene_count(
-            adjusted_scenes, expected_transitions, duration
+            adjusted_scenes, expected_transitions or 0, duration, transcript_path
         )
         
         # Apply corrections if needed
-        if validation_result['status'] == 'UNDER_DETECTED' and expected_transitions > 0:
+        if validation_result['status'] == 'UNDER_DETECTED' and expected_transitions and expected_transitions > 0:
             logger.info("Applying interpolation to add missing scenes")
             adjusted_scenes = _interpolate_missing_scenes(
                 adjusted_scenes, expected_transitions, duration
             )
         
+        # Create comprehensive diagnostic information
+        diagnostic_info = {
+            'algorithm_reliability': reliability_scores,
+            'algorithm_weights': algorithm_weights,
+            'confidence_threshold': confidence_threshold,
+            'adaptive_detection_used': enable_adaptive and expected_transitions and expected_transitions > 0,
+            'configuration': {
+                'threshold': threshold,
+                'keynote_delay': keynote_delay,
+                'min_scene_duration': min_scene_duration,
+                'multi_algorithm': enable_multi_algorithm,
+                'static_detection': enable_static_detection,
+                'content_analysis': enable_content_analysis
+            }
+        }
+        
+        # Add adaptive detection info if used
+        if enable_adaptive and expected_transitions and expected_transitions > 0:
+            diagnostic_info['adaptive_validation'] = locals().get('adaptive_validation', {})
+        
+        # Calculate scene statistics for logging
+        scene_timestamps = [scene['timestamp'] for scene in adjusted_scenes]
+        if scene_timestamps:
+            gaps = [scene_timestamps[i] - scene_timestamps[i-1] for i in range(1, len(scene_timestamps))]
+            avg_gap = sum(gaps) / len(gaps) if gaps else 0
+            min_gap = min(gaps) if gaps else 0
+            max_gap = max(gaps) if gaps else 0
+        else:
+            avg_gap = min_gap = max_gap = 0
+        
         result = {
             'scenes': adjusted_scenes,
-            'detection_methods': [method for method, _ in detection_results],
-            'method_results': {method: len(scenes) for method, scenes in detection_results},
+            'detection_methods': [method for method, _, _ in detection_results],
+            'method_results': {method: len(scenes) for method, scenes, _ in detection_results},
+            'method_weights': {method: weight for method, _, weight in detection_results},
             'validation': validation_result,
             'video_info': {
                 'duration': duration,
                 'frame_rate': frame_rate,
                 'keynote_delay': keynote_delay
+            },
+            'diagnostics': diagnostic_info,
+            'statistics': {
+                'total_scenes': len(adjusted_scenes),
+                'average_gap': avg_gap,
+                'min_gap': min_gap,
+                'max_gap': max_gap,
+                'scene_distribution': 'uniform' if max_gap - min_gap < avg_gap * 0.5 else 'varied'
             }
         }
         
+        # Enhanced logging
         logger.info(f"Keynote scene detection complete: {len(adjusted_scenes)} scenes detected")
+        logger.info(f"Scene statistics: avg_gap={avg_gap:.2f}s, min_gap={min_gap:.2f}s, max_gap={max_gap:.2f}s")
+        logger.info(f"Detection methods used: {[method for method, _, _ in detection_results]}")
+        logger.info(f"Algorithm reliability scores: {reliability_scores}")
+        logger.info(f"Validation status: {validation_result.get('status', 'UNKNOWN')}")
+        
         return result
         
     except Exception as e:
         raise VideoAnalysisError(f"Keynote scene detection failed for {video_path}: {str(e)}")
+
+
+def save_analysis_manifest(
+    analysis_result: Dict[str, Any],
+    video_path: str,
+    output_dir: str = None
+) -> str:
+    """
+    Save comprehensive video analysis manifest for debugging and validation.
+    
+    Args:
+        analysis_result: Result from detect_keynote_scenes()
+        video_path: Path to the original video file
+        output_dir: Directory to save manifest (defaults to config output_dir)
+        
+    Returns:
+        Path to saved manifest file
+    """
+    if output_dir is None:
+        config = config_loader.load_config()
+        output_dir = config.get('video_analysis', {}).get('output_dir', 'workspace/video_analysis')
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create manifest filename based on video path
+    video_stem = Path(video_path).stem
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    manifest_path = Path(output_dir) / f"scene_analysis_{video_stem}_{timestamp}.json"
+    
+    # Create comprehensive manifest
+    manifest = {
+        'metadata': {
+            'video_path': video_path,
+            'analysis_timestamp': datetime.now().isoformat(),
+            'autovid_version': 'Phase2-Enhanced',
+            'analysis_type': 'keynote_scene_detection'
+        },
+        'analysis_result': analysis_result,
+        'summary': {
+            'total_scenes': len(analysis_result.get('scenes', [])),
+            'detection_methods': analysis_result.get('detection_methods', []),
+            'validation_status': analysis_result.get('validation', {}).get('status', 'UNKNOWN'),
+            'reliability_scores': analysis_result.get('diagnostics', {}).get('algorithm_reliability', {}),
+            'adaptive_used': analysis_result.get('diagnostics', {}).get('adaptive_detection_used', False),
+            'scene_distribution': analysis_result.get('statistics', {}).get('scene_distribution', 'unknown')
+        }
+    }
+    
+    # Save manifest
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2, default=str)
+    
+    logger.info(f"Analysis manifest saved to: {manifest_path}")
+    return str(manifest_path)
 
 
 def _detect_scenes_sensitive(video_path: str, threshold: float = 0.1) -> List[float]:
@@ -753,23 +922,375 @@ def _merge_scene_detections(detection_results: List[List[float]], tolerance: flo
     return merged
 
 
+def _merge_scene_detections_weighted(
+    detection_results: List[Tuple[str, List[float], float]], 
+    tolerance: float = 0.5,
+    confidence_threshold: float = 0.5
+) -> Tuple[List[float], List[Dict[str, Any]]]:
+    """
+    Merge overlapping detections using weighted voting with confidence scores.
+    
+    Args:
+        detection_results: List of (method_name, scenes, weight) tuples
+        tolerance: Time tolerance for grouping similar detections
+        confidence_threshold: Minimum confidence required for scene acceptance
+        
+    Returns:
+        Tuple of (merged_scenes, scene_metadata)
+    """
+    if not detection_results:
+        return [], []
+    
+    # Create weighted scene candidates
+    scene_candidates = []
+    for method_name, scenes, weight in detection_results:
+        for timestamp in scenes:
+            scene_candidates.append({
+                'timestamp': timestamp,
+                'method': method_name,
+                'weight': weight,
+                'confidence': weight  # Initial confidence equals weight
+            })
+    
+    if not scene_candidates:
+        return [], []
+    
+    # Sort by timestamp
+    scene_candidates.sort(key=lambda x: x['timestamp'])
+    
+    # Group nearby candidates using clustering
+    clusters = []
+    current_cluster = [scene_candidates[0]]
+    
+    for candidate in scene_candidates[1:]:
+        # If within tolerance of cluster center, add to current cluster
+        cluster_center = sum(c['timestamp'] for c in current_cluster) / len(current_cluster)
+        if abs(candidate['timestamp'] - cluster_center) <= tolerance:
+            current_cluster.append(candidate)
+        else:
+            # Start new cluster
+            clusters.append(current_cluster)
+            current_cluster = [candidate]
+    clusters.append(current_cluster)
+    
+    # Apply weighted voting within each cluster
+    merged_scenes = []
+    scene_metadata = []
+    
+    for cluster in clusters:
+        # Calculate weighted average timestamp
+        total_weight = sum(c['weight'] for c in cluster)
+        weighted_timestamp = sum(c['timestamp'] * c['weight'] for c in cluster) / total_weight
+        
+        # Calculate combined confidence
+        confidence = min(1.0, total_weight / len(detection_results))  # Normalize by number of methods
+        
+        # Only accept scenes above confidence threshold
+        if confidence >= confidence_threshold:
+            merged_scenes.append(weighted_timestamp)
+            
+            # Create metadata for this scene
+            methods_used = list(set(c['method'] for c in cluster))
+            scene_metadata.append({
+                'timestamp': weighted_timestamp,
+                'confidence': confidence,
+                'methods': methods_used,
+                'method_count': len(methods_used),
+                'total_weight': total_weight,
+                'cluster_size': len(cluster)
+            })
+    
+    return merged_scenes, scene_metadata
+
+
+def _calculate_algorithm_reliability(
+    detection_results: List[Tuple[str, List[float], float]],
+    expected_count: Optional[int] = None,
+    video_duration: float = 0.0
+) -> Dict[str, float]:
+    """
+    Calculate reliability scores for each detection algorithm.
+    
+    Args:
+        detection_results: List of (method_name, scenes, weight) tuples
+        expected_count: Expected number of transitions for accuracy calculation
+        video_duration: Video duration for distribution analysis
+        
+    Returns:
+        Dictionary mapping algorithm names to reliability scores (0.0-1.0)
+    """
+    reliability_scores = {}
+    
+    for method_name, scenes, base_weight in detection_results:
+        score = base_weight  # Start with base weight
+        
+        # Factor 1: Detection count reasonableness
+        if expected_count and expected_count > 0:
+            count_ratio = len(scenes) / expected_count
+            # Penalize extreme over/under detection
+            if count_ratio < 0.5 or count_ratio > 2.0:
+                score *= 0.7
+            elif 0.8 <= count_ratio <= 1.2:
+                score *= 1.1  # Reward accurate counts
+        
+        # Factor 2: Scene distribution (avoid clustering at beginning/end)
+        if len(scenes) > 1 and video_duration > 0:
+            # Check if scenes are well distributed
+            gaps = []
+            for i in range(1, len(scenes)):
+                gaps.append(scenes[i] - scenes[i-1])
+            
+            if gaps:
+                gap_variance = sum((gap - sum(gaps)/len(gaps))**2 for gap in gaps) / len(gaps)
+                # Reward consistent spacing
+                if gap_variance < (video_duration / len(scenes)) * 0.5:
+                    score *= 1.05
+        
+        # Factor 3: Avoid edge clustering (first/last 10% of video)
+        edge_threshold = video_duration * 0.1
+        edge_scenes = sum(1 for s in scenes if s < edge_threshold or s > video_duration - edge_threshold)
+        if edge_scenes > len(scenes) * 0.5:  # More than half at edges
+            score *= 0.8
+        
+        # Normalize score to 0.0-1.0 range
+        reliability_scores[method_name] = min(1.0, max(0.1, score))
+    
+    return reliability_scores
+
+
+def _apply_fallback_strategies(
+    detection_results: List[Tuple[str, List[float], float]],
+    reliability_scores: Dict[str, float],
+    min_reliability: float = 0.3
+) -> List[Tuple[str, List[float], float]]:
+    """
+    Apply fallback strategies when algorithms have low reliability.
+    
+    Args:
+        detection_results: Original detection results
+        reliability_scores: Calculated reliability scores
+        min_reliability: Minimum acceptable reliability score
+        
+    Returns:
+        Filtered and adjusted detection results
+    """
+    # Filter out unreliable methods
+    reliable_results = []
+    for method_name, scenes, weight in detection_results:
+        reliability = reliability_scores.get(method_name, 0.5)
+        if reliability >= min_reliability:
+            # Adjust weight based on reliability
+            adjusted_weight = weight * reliability
+            reliable_results.append((method_name, scenes, adjusted_weight))
+    
+    # If no methods are reliable enough, keep the best one with reduced confidence
+    if not reliable_results and detection_results:
+        best_method = max(detection_results, key=lambda x: reliability_scores.get(x[0], 0.0))
+        method_name, scenes, weight = best_method
+        # Reduce weight significantly for unreliable fallback
+        fallback_weight = weight * 0.3
+        reliable_results = [(method_name, scenes, fallback_weight)]
+        logger.warning(f"All algorithms unreliable, using fallback: {method_name} (reliability: {reliability_scores.get(method_name, 0.0):.2f})")
+    
+    return reliable_results
+
+
+def _adjust_thresholds_adaptively(
+    initial_threshold: float,
+    validation_result: Dict[str, Any],
+    expected_count: Optional[int] = None,
+    adjustment_factor: float = 0.1,
+    max_adjustments: int = 3
+) -> Tuple[float, bool]:
+    """
+    Adaptively adjust detection threshold based on validation results.
+    
+    Args:
+        initial_threshold: Starting threshold value
+        validation_result: Validation result from _validate_scene_count
+        expected_count: Expected number of transitions
+        adjustment_factor: How much to adjust threshold (0.0-1.0)
+        max_adjustments: Maximum number of adjustment attempts
+        
+    Returns:
+        Tuple of (adjusted_threshold, should_retry)
+    """
+    status = validation_result.get('status', 'UNKNOWN')
+    detected_count = validation_result.get('detected_count', 0)
+    
+    if status == 'VALIDATED' or not expected_count or expected_count == 0:
+        return initial_threshold, False
+    
+    # Calculate adjustment based on validation status
+    new_threshold = initial_threshold
+    should_retry = False
+    
+    if status == 'UNDER_DETECTED':
+        # Lower threshold to increase sensitivity
+        new_threshold = max(0.01, initial_threshold - adjustment_factor)
+        should_retry = True
+        logger.info(f"Under-detection: lowering threshold from {initial_threshold:.3f} to {new_threshold:.3f}")
+    
+    elif status == 'OVER_DETECTED':
+        # Raise threshold to decrease sensitivity
+        new_threshold = min(1.0, initial_threshold + adjustment_factor)
+        should_retry = True
+        logger.info(f"Over-detection: raising threshold from {initial_threshold:.3f} to {new_threshold:.3f}")
+    
+    # Don't retry if threshold can't be adjusted further
+    if abs(new_threshold - initial_threshold) < 0.001:
+        should_retry = False
+    
+    return new_threshold, should_retry
+
+
+def _detect_with_adaptive_thresholds(
+    video_path: str,
+    video_config: Dict[str, Any],
+    expected_transitions: Optional[int],
+    duration: float,
+    max_attempts: int = 3
+) -> Tuple[List[Tuple[str, List[float], float]], Dict[str, Any]]:
+    """
+    Perform scene detection with adaptive threshold adjustment.
+    
+    Args:
+        video_path: Path to video file
+        video_config: Configuration parameters
+        expected_transitions: Expected number of transitions
+        duration: Video duration
+        max_attempts: Maximum adjustment attempts
+        
+    Returns:
+        Tuple of (detection_results, final_validation_result)
+    """
+    threshold = video_config.get('scene_threshold', 0.1)
+    best_results = None
+    best_validation = None
+    attempt = 0
+    
+    while attempt < max_attempts:
+        attempt += 1
+        logger.info(f"Adaptive detection attempt {attempt}/{max_attempts} with threshold {threshold:.3f}")
+        
+        # Run detection with current threshold
+        detection_results = []
+        
+        # Method 1: Ultra-sensitive FFmpeg scene detection
+        if video_config.get('enable_multi_algorithm', True):
+            try:
+                scenes_method1 = _detect_scenes_sensitive(video_path, threshold=threshold)
+                weight = video_config.get('algorithm_weights', {}).get('sensitive', 1.0)
+                detection_results.append(("sensitive", scenes_method1, weight))
+            except Exception as e:
+                logger.warning(f"Sensitive detection failed: {e}")
+        
+        # Method 2: Static period detection
+        if video_config.get('presentation_mode', True) and video_config.get('enable_static_detection', True):
+            try:
+                scenes_method2 = _detect_static_transitions(video_path, pause_duration=1.0)
+                weight = video_config.get('algorithm_weights', {}).get('static', 1.2)
+                detection_results.append(("static", scenes_method2, weight))
+            except Exception as e:
+                logger.warning(f"Static detection failed: {e}")
+        
+        # Method 3: Content-based detection
+        if video_config.get('enable_content_analysis', True):
+            try:
+                scenes_method3 = _detect_content_changes(video_path, threshold=threshold * 1.5)
+                weight = video_config.get('algorithm_weights', {}).get('content', 0.9)
+                detection_results.append(("content", scenes_method3, weight))
+            except Exception as e:
+                logger.warning(f"Content detection failed: {e}")
+        
+        if not detection_results:
+            logger.warning(f"No detection results on attempt {attempt}")
+            break
+        
+        # Quick validation to check if we should adjust
+        total_scenes = sum(len(scenes) for _, scenes, _ in detection_results)
+        quick_validation = {
+            'detected_count': total_scenes,
+            'expected_count': expected_transitions or 0,
+            'status': 'VALIDATED'
+        }
+        
+        if expected_transitions and expected_transitions > 0:
+            ratio = total_scenes / expected_transitions
+            if ratio < 0.7:
+                quick_validation['status'] = 'UNDER_DETECTED'
+            elif ratio > 1.5:
+                quick_validation['status'] = 'OVER_DETECTED'
+        
+        # Store best results so far
+        if best_results is None or quick_validation['status'] == 'VALIDATED':
+            best_results = detection_results
+            best_validation = quick_validation
+        
+        # If validation is good or we can't adjust further, stop
+        if quick_validation['status'] == 'VALIDATED':
+            logger.info(f"Adaptive threshold found optimal value: {threshold:.3f}")
+            break
+        
+        # Adjust threshold for next attempt
+        adjustment_factor = 0.1 / attempt  # Smaller adjustments on later attempts
+        new_threshold, should_retry = _adjust_thresholds_adaptively(
+            threshold, quick_validation, expected_transitions, adjustment_factor
+        )
+        
+        if not should_retry or abs(new_threshold - threshold) < 0.001:
+            logger.info(f"Threshold adjustment complete after {attempt} attempts")
+            break
+        
+        threshold = new_threshold
+    
+    return best_results or [], best_validation or {'status': 'FAILED', 'detected_count': 0}
+
+
 def _validate_scene_count(
     detected_scenes: List[Dict[str, Any]], 
     expected_count: int, 
-    video_duration: float
+    video_duration: float,
+    transcript_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Enhanced validation with corrective actions.
+    Enhanced validation with corrective actions and transcript cue validation.
     
     Args:
         detected_scenes: List of detected scene dictionaries
         expected_count: Expected number of transitions
         video_duration: Total video duration
+        transcript_path: Optional path to transcript JSON for cue validation
         
     Returns:
         Validation result with status and recommendations
     """
     detected_count = len(detected_scenes)
+    
+    # Try to validate against transcript cues if available
+    transcript_cue_count = None
+    if transcript_path and os.path.exists(transcript_path):
+        try:
+            with open(transcript_path, 'r') as f:
+                transcript_data = json.load(f)
+            
+            # Count [transition] cues in transcript chunks
+            transition_cues = 0
+            chunks = transcript_data.get('chunks', [])
+            for chunk in chunks:
+                text = chunk.get('text', '')
+                transition_cues += text.count('[transition]')
+            
+            transcript_cue_count = transition_cues
+            logger.info(f"Found {transition_cues} [transition] cues in transcript")
+            
+            # If transcript cues are available and expected_count is 0, use transcript count
+            if expected_count == 0 and transcript_cue_count > 0:
+                expected_count = transcript_cue_count
+                logger.info(f"Using transcript cue count as expected: {expected_count}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to validate against transcript cues: {e}")
     
     if expected_count == 0:
         return {
@@ -777,13 +1298,21 @@ def _validate_scene_count(
             'message': 'No expected transitions provided',
             'detected_count': detected_count,
             'expected_count': 0,
+            'transcript_cue_count': transcript_cue_count,
             'ratio': 0
         }
     
     ratio = detected_count / expected_count if expected_count > 0 else 0
     
+    # Enhanced validation with transcript cue cross-check
+    validation_sources = []
+    if transcript_cue_count is not None:
+        cue_ratio = detected_count / transcript_cue_count if transcript_cue_count > 0 else 0
+        validation_sources.append(f"transcript_cues:{transcript_cue_count}(ratio:{cue_ratio:.2f})")
+    
+    # Determine status based on ratio
     if 0.7 <= ratio <= 1.3:  # Within 30%
-        status = 'PASS'
+        status = 'VALIDATED'
         message = f"Good match: {detected_count}/{expected_count} scenes (ratio: {ratio:.2f})"
     elif 0.3 <= ratio < 0.7:
         status = 'UNDER_DETECTED'
@@ -795,12 +1324,18 @@ def _validate_scene_count(
         status = 'OVER_DETECTED'
         message = f"Over-detection: {detected_count}/{expected_count} scenes (ratio: {ratio:.2f})"
     
+    # Add transcript validation information to message
+    if validation_sources:
+        message += f" [Sources: {', '.join(validation_sources)}]"
+    
     return {
         'status': status,
         'message': message,
         'detected_count': detected_count,
         'expected_count': expected_count,
-        'ratio': ratio
+        'transcript_cue_count': transcript_cue_count,
+        'ratio': ratio,
+        'validation_sources': validation_sources
     }
 
 

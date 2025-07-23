@@ -47,24 +47,53 @@ video_analysis:
   enable_static_detection: true   # detect 1-second static periods before transitions
   enable_content_analysis: true   # histogram-based content change detection
   
-  # Multi-algorithm detection configuration
+  # Multi-algorithm weighted voting configuration
+  algorithm_weights:
+    sensitive: 1.0                # Ultra-sensitive scene detection weight
+    static: 1.2                   # Static period detection weight (preferred for Keynote)
+    content: 0.9                  # Content-based detection weight
+  
+  confidence_threshold: 0.5       # Minimum confidence for scene acceptance
+  min_algorithm_reliability: 0.3  # Minimum reliability score for algorithm inclusion
+  
+  # Adaptive threshold adjustment
+  enable_adaptive_thresholds: true # Enable adaptive threshold adjustment
+  max_adaptive_attempts: 3        # Maximum adjustment attempts
+  adaptive_adjustment_factor: 0.1 # Base adjustment factor (reduced on each attempt)
+  
+  # Algorithm reliability configuration
+  reliability_factors:
+    count_accuracy_weight: 1.1    # Weight for count accuracy in reliability scoring
+    distribution_weight: 1.05     # Weight for scene distribution in reliability scoring
+    edge_clustering_penalty: 0.8  # Penalty for scenes clustered at video edges
+  
+  # Enhanced validation parameters
+  validation_tolerance: [0.7, 1.3]  # acceptable range for scene count validation (min, max ratio)
+  under_detection_threshold: 0.7  # Ratio below which under-detection is flagged
+  over_detection_threshold: 1.5   # Ratio above which over-detection is flagged
+  
+  # Weighted voting parameters
+  clustering_tolerance: 0.5       # Time tolerance for clustering similar detections
+  max_cluster_size: 5             # Maximum detections per cluster
+  
+  # Legacy algorithm-specific parameters (maintained for compatibility)
   algorithms:
     sensitive_scene:
       enabled: true
       threshold: 0.05             # Ultra-sensitive scene detection
-      weight: 0.4                 # Algorithm weight in final decision
+      weight: 1.0                 # Algorithm weight in final decision
     
     static_detection:
       enabled: true
       pause_duration: 1.0         # Detect 1-second static periods
       frame_similarity_threshold: 0.95 # Similarity threshold for static frames
-      weight: 0.3
+      weight: 1.2
     
     content_analysis:
       enabled: true
       histogram_threshold: 0.15   # Histogram-based content change detection
       grid_size: [4, 4]           # Grid for localized analysis
-      weight: 0.3
+      weight: 0.9
   
   # Advanced detection features
   detect_animations: true         # Detect in-slide animations vs transitions
@@ -73,9 +102,8 @@ video_analysis:
   parallel_processing: true       # Enable parallel scene detection
   cache_frame_analysis: true      # Cache frame analysis results
   
-  # Validation and auto-adjustment
+  # Validation and auto-adjustment (legacy)
   expected_cue_token: "[transition]" # Token to count in transcript
-  validation_tolerance: [0.7, 1.3]  # acceptable range for scene count validation
   auto_adjust_threshold: true     # Auto-adjust if validation fails
   adjustment_step: 0.02           # Threshold adjustment increment
   max_adjustments: 5              # Maximum auto-adjustments
