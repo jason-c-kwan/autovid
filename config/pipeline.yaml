@@ -34,12 +34,24 @@ audio_splicing:
 
 # --- Video Analysis Configuration -------------------------
 video_analysis:
-  scene_threshold: 0.4            # scene detection sensitivity (0.0-1.0, higher = less sensitive)
+  scene_threshold: 0.1            # scene detection sensitivity (0.0-1.0, lower = more sensitive for Keynote)
   movement_threshold: 0.1         # movement detection sensitivity (0.0-1.0)
   keynote_delay: 1.0              # keynote export delay compensation in seconds
   min_scene_duration: 0.5         # minimum duration between scenes in seconds
   validate_transitions: true      # validate against transcript transition cues
   output_dir: workspace/video_analysis  # directory for analysis manifests
+  
+  # Keynote-specific optimizations
+  presentation_mode: true         # enable Keynote-specific scene detection algorithms
+  enable_multi_algorithm: true    # use multiple detection methods for better accuracy
+  enable_static_detection: true   # detect 1-second static periods before transitions
+  enable_content_analysis: true   # histogram-based content change detection
+  
+  # Advanced tuning
+  static_period_duration: 1.0     # duration for static period detection (seconds)
+  content_threshold_multiplier: 1.5  # multiplier for content detection threshold
+  merge_tolerance: 0.5            # time tolerance for merging similar detections (seconds)
+  validation_tolerance: [0.7, 1.3]  # acceptable range for scene count validation
 
 # --- Video Synchronization Configuration ------------------
 video_sync:
@@ -122,10 +134,11 @@ steps:
   - id: splice_audio
   - id: analyze_video
     parameters:
-      scene_threshold: 0.4
+      scene_threshold: 0.1          # more sensitive for slide transitions
       movement_threshold: 0.1
       keynote_delay: 1.0
       validate_transitions: true
+      presentation_mode: true       # enable Keynote-optimized detection
   - id: sync_slides
     parameters:
       assembly_method: standard

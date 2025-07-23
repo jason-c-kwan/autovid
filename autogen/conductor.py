@@ -460,6 +460,7 @@ def main():
                 movement_threshold = step_params.get("movement_threshold", 0.1)
                 keynote_delay = step_params.get("keynote_delay", 1.0)
                 validate_transitions = step_params.get("validate_transitions", True)
+                presentation_mode = step_params.get("presentation_mode", False)
 
                 for stem in stems:
                     # Look for video file (.mov or .mp4)
@@ -480,13 +481,34 @@ def main():
                         # Generate output path for analysis manifest
                         analysis_manifest_path = os.path.join(video_analysis_output_dir, f"{stem}_video_analysis.json")
                         
-                        # Look for transcript manifest for validation
+                        # Look for transcript manifest for validation and transition count
                         transcript_path = None
+                        expected_transitions = 0
                         if validate_transitions:
                             transcript_manifest_dir = os.path.join(workspace_root, "01_transcripts")
                             transcript_manifest_path = os.path.join(transcript_manifest_dir, f"{stem}_transcript_manifest.json")
                             if os.path.exists(transcript_manifest_path):
                                 transcript_path = transcript_manifest_path
+                                
+                                # Extract expected transition count for Keynote optimization
+                                if presentation_mode:
+                                    try:
+                                        with open(transcript_manifest_path, 'r') as f:
+                                            transcript_data = json.load(f)
+                                        
+                                        # Count transition cues
+                                        transition_cues = []
+                                        if 'transcript' in transcript_data and 'slides' in transcript_data['transcript']:
+                                            for slide in transcript_data['transcript']['slides']:
+                                                if 'segments' in slide:
+                                                    for segment in slide['segments']:
+                                                        if segment.get('kind') == 'cue':
+                                                            transition_cues.append(segment.get('cue', '[transition]'))
+                                        
+                                        expected_transitions = len(transition_cues)
+                                        logging.info(f"Extracted {expected_transitions} expected transitions for {stem}")
+                                    except (json.JSONDecodeError, KeyError) as e:
+                                        logging.warning(f"Failed to extract transition count from {transcript_manifest_path}: {e}")
                             else:
                                 logging.warning(f"Transcript manifest not found for validation: {transcript_manifest_path}")
                         
@@ -498,6 +520,8 @@ def main():
                             scene_threshold=scene_threshold,
                             movement_threshold=movement_threshold,
                             keynote_delay=keynote_delay,
+                            presentation_mode=presentation_mode,
+                            expected_transitions=expected_transitions,
                             step_id=step_id
                         )
                         

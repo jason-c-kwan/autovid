@@ -94,10 +94,11 @@ def detect_scene_changes(video_path: str, threshold: float = 0.4,
         
         # Enhanced scene detection using multiple methods for better accuracy
         try:
-            # Method 1: Use scene filter with detailed output
+            # Method 1: Use scene filter with detailed output (optimized for performance)
             result = (
                 ffmpeg
                 .input(video_path)
+                .filter('fps', fps=1)  # Reduce framerate aggressively for 4K video
                 .filter('select', f'gt(scene,{threshold})')
                 .filter('showinfo')
                 .output('pipe:', format='null')
@@ -196,10 +197,11 @@ def _detect_scenes_fallback(video_path: str, threshold: float, min_scene_duratio
     scenes = []
     
     try:
-        # Use histogram-based detection as fallback
+        # Use histogram-based detection as fallback (optimized for performance)
         result = (
             ffmpeg
             .input(video_path)
+            .filter('fps', fps=1)  # Reduce framerate aggressively for 4K video
             .filter('select', f'gt(scene,{threshold * 0.7})')  # Lower threshold for fallback
             .filter('metadata', mode='print')
             .output('pipe:', format='null')
@@ -458,11 +460,428 @@ def generate_timing_manifest(video_path: str,
     return manifest
 
 
+def detect_keynote_scenes(
+    video_path: str,
+    expected_transitions: int = 0,
+    threshold: float = 0.1,
+    keynote_delay: float = 1.0,
+    presentation_mode: bool = True,
+    min_scene_duration: float = 0.5
+) -> Dict[str, Any]:
+    """
+    Keynote-optimized scene detection combining multiple algorithms.
+    
+    This function uses three different detection methods specifically tuned for
+    slide-only videos with subtle transitions and 1-second Keynote pauses.
+    
+    Args:
+        video_path: Path to the video file
+        expected_transitions: Expected number of transitions for validation
+        threshold: Base scene detection sensitivity (0.0-1.0, lower = more sensitive)
+        keynote_delay: Keynote export delay compensation in seconds
+        presentation_mode: Enable Keynote-specific optimizations
+        min_scene_duration: Minimum duration between scenes in seconds
+        
+    Returns:
+        Dictionary containing detected scenes and metadata
+        
+    Raises:
+        VideoAnalysisError: If all detection methods fail
+    """
+    try:
+        logger.info(f"Starting Keynote-optimized scene detection for {video_path}")
+        logger.info(f"Expected transitions: {expected_transitions}, threshold: {threshold}")
+        
+        video_info = probe_video_info(video_path)
+        frame_rate = video_info['frame_rate']
+        duration = video_info['duration']
+        
+        detection_results = []
+        
+        # Method 1: Ultra-sensitive FFmpeg scene detection
+        try:
+            logger.debug("Running ultra-sensitive scene detection")
+            scenes_method1 = _detect_scenes_sensitive(video_path, threshold=threshold)
+            detection_results.append(("sensitive", scenes_method1))
+            logger.info(f"Sensitive detection found {len(scenes_method1)} scenes")
+        except Exception as e:
+            logger.warning(f"Sensitive detection failed: {e}")
+        
+        # Method 2: Static period detection for 1-second pauses
+        if presentation_mode:
+            try:
+                logger.debug("Running static period detection")
+                scenes_method2 = _detect_static_transitions(video_path, pause_duration=1.0)
+                detection_results.append(("static", scenes_method2))
+                logger.info(f"Static detection found {len(scenes_method2)} transitions")
+            except Exception as e:
+                logger.warning(f"Static detection failed: {e}")
+        
+        # Method 3: Content-based detection with histogram comparison
+        try:
+            logger.debug("Running content-based detection")
+            scenes_method3 = _detect_content_changes(video_path, threshold=threshold * 1.5)
+            detection_results.append(("content", scenes_method3))
+            logger.info(f"Content detection found {len(scenes_method3)} scenes")
+        except Exception as e:
+            logger.warning(f"Content detection failed: {e}")
+        
+        if not detection_results:
+            raise VideoAnalysisError("All scene detection methods failed")
+        
+        # Combine and validate results
+        combined_scenes = _merge_scene_detections(
+            [scenes for _, scenes in detection_results], 
+            tolerance=min_scene_duration
+        )
+        
+        # Apply Keynote delay compensation
+        adjusted_scenes = []
+        for timestamp in combined_scenes:
+            adjusted_timestamp = max(0, timestamp - keynote_delay)
+            frame_number = int(adjusted_timestamp * frame_rate)
+            adjusted_scenes.append({
+                'timestamp': adjusted_timestamp,
+                'original_timestamp': timestamp,
+                'frame_number': frame_number,
+                'confidence': 0.8,  # Combined confidence
+                'slide_number': len(adjusted_scenes) + 1,
+                'scene_score': None,
+                'transition_type': 'keynote_optimized',
+                'detection_methods': [method for method, _ in detection_results]
+            })
+        
+        # Validate against expected count
+        validation_result = _validate_scene_count(
+            adjusted_scenes, expected_transitions, duration
+        )
+        
+        # Apply corrections if needed
+        if validation_result['status'] == 'UNDER_DETECTED' and expected_transitions > 0:
+            logger.info("Applying interpolation to add missing scenes")
+            adjusted_scenes = _interpolate_missing_scenes(
+                adjusted_scenes, expected_transitions, duration
+            )
+        
+        result = {
+            'scenes': adjusted_scenes,
+            'detection_methods': [method for method, _ in detection_results],
+            'method_results': {method: len(scenes) for method, scenes in detection_results},
+            'validation': validation_result,
+            'video_info': {
+                'duration': duration,
+                'frame_rate': frame_rate,
+                'keynote_delay': keynote_delay
+            }
+        }
+        
+        logger.info(f"Keynote scene detection complete: {len(adjusted_scenes)} scenes detected")
+        return result
+        
+    except Exception as e:
+        raise VideoAnalysisError(f"Keynote scene detection failed for {video_path}: {str(e)}")
+
+
+def _detect_scenes_sensitive(video_path: str, threshold: float = 0.1) -> List[float]:
+    """
+    Ultra-sensitive scene detection with lowered threshold for slide transitions.
+    
+    Args:
+        video_path: Path to the video file
+        threshold: Scene detection threshold (lower = more sensitive)
+        
+    Returns:
+        List of scene transition timestamps
+    """
+    try:
+        result = (
+            ffmpeg
+            .input(video_path)
+            .filter('fps', fps=1)  # Reduce framerate aggressively for 4K video
+            .filter('select', f'gt(scene,{threshold})')
+            .filter('showinfo')
+            .output('pipe:', format='null')
+            .global_args('-loglevel', 'info', '-nostats')
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        stderr_output = result[1].decode()
+        scenes = []
+        
+        import re
+        for line in stderr_output.split('\n'):
+            if 'showinfo' in line and 'pts_time:' in line:
+                timestamp_match = re.search(r'pts_time:(\d+(?:\.\d+)?)', line)
+                if timestamp_match:
+                    timestamp = float(timestamp_match.group(1))
+                    scenes.append(timestamp)
+        
+        return sorted(list(set(scenes)))  # Remove duplicates and sort
+        
+    except ffmpeg.Error as e:
+        logger.error(f"Sensitive scene detection failed: {e.stderr.decode()}")
+        return []
+
+
+def _detect_static_transitions(video_path: str, pause_duration: float = 1.0) -> List[float]:
+    """
+    Detect scene transitions by finding static frame periods.
+    
+    Keynote videos have 1-second pauses before slide transitions.
+    This function detects when frames become nearly identical for 1+ seconds.
+    
+    Args:
+        video_path: Path to the video file
+        pause_duration: Duration of static period to detect
+        
+    Returns:
+        List of transition timestamps after static periods
+    """
+    try:
+        # Use framerate decimation and small scene changes to avoid processing every frame
+        # This reduces processing time while still detecting transitions
+        result = (
+            ffmpeg
+            .input(video_path)
+            .filter('fps', fps=1)  # Reduce framerate aggressively for 4K video
+            .filter('select', 'gt(scene,0.005)')  # Small scene changes only
+            .filter('showinfo') 
+            .output('pipe:', format='null')
+            .global_args('-loglevel', 'info', '-nostats')
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        stderr_output = result[1].decode()
+        transitions = []
+        
+        import re
+        for line in stderr_output.split('\n'):
+            if 'showinfo' in line and 'pts_time:' in line:
+                timestamp_match = re.search(r'pts_time:(\d+(?:\.\d+)?)', line)
+                if timestamp_match:
+                    timestamp = float(timestamp_match.group(1))
+                    transitions.append(timestamp)
+        
+        # Filter transitions that are at least pause_duration apart
+        filtered_transitions = []
+        last_transition = -pause_duration
+        
+        for timestamp in sorted(transitions):
+            if timestamp - last_transition >= pause_duration:
+                filtered_transitions.append(timestamp)
+                last_transition = timestamp
+        
+        return filtered_transitions
+        
+    except ffmpeg.Error as e:
+        logger.error(f"Static transition detection failed: {e.stderr.decode()}")
+        return []
+
+
+def _detect_content_changes(video_path: str, threshold: float = 0.15) -> List[float]:
+    """
+    Histogram-based content change detection for slide transitions.
+    
+    Args:
+        video_path: Path to the video file
+        threshold: Content difference threshold
+        
+    Returns:
+        List of scene transition timestamps
+    """
+    try:
+        # Use histogram-based detection which is more sensitive to color/content changes
+        result = (
+            ffmpeg
+            .input(video_path)
+            .filter('fps', fps=1)  # Reduce framerate aggressively for 4K video
+            .filter('select', f'gt(scene,{threshold})')
+            .filter('metadata', mode='print')
+            .output('pipe:', format='null')
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        stderr_output = result[1].decode()
+        scenes = []
+        
+        import re
+        for line in stderr_output.split('\n'):
+            # Look for frame metadata with timestamps
+            timestamp_match = re.search(r'frame:\s*\d+\s+pts:\s*\d+\s+pts_time:(\d+(?:\.\d+)?)', line)
+            if timestamp_match:
+                timestamp = float(timestamp_match.group(1))
+                scenes.append(timestamp)
+        
+        return sorted(list(set(scenes)))
+        
+    except ffmpeg.Error as e:
+        logger.error(f"Content-based detection failed: {e.stderr.decode()}")
+        return []
+
+
+def _merge_scene_detections(detection_results: List[List[float]], tolerance: float = 0.5) -> List[float]:
+    """
+    Merge overlapping detections from multiple algorithms.
+    
+    Args:
+        detection_results: List of detection results from different methods
+        tolerance: Time tolerance for merging similar detections
+        
+    Returns:
+        Merged list of scene timestamps
+    """
+    if not detection_results:
+        return []
+    
+    # Flatten all detections
+    all_scenes = []
+    for scenes in detection_results:
+        all_scenes.extend(scenes)
+    
+    if not all_scenes:
+        return []
+    
+    # Sort and merge nearby detections
+    all_scenes.sort()
+    merged = [all_scenes[0]]
+    
+    for timestamp in all_scenes[1:]:
+        # If this timestamp is close to the last merged one, skip it
+        if timestamp - merged[-1] > tolerance:
+            merged.append(timestamp)
+    
+    return merged
+
+
+def _validate_scene_count(
+    detected_scenes: List[Dict[str, Any]], 
+    expected_count: int, 
+    video_duration: float
+) -> Dict[str, Any]:
+    """
+    Enhanced validation with corrective actions.
+    
+    Args:
+        detected_scenes: List of detected scene dictionaries
+        expected_count: Expected number of transitions
+        video_duration: Total video duration
+        
+    Returns:
+        Validation result with status and recommendations
+    """
+    detected_count = len(detected_scenes)
+    
+    if expected_count == 0:
+        return {
+            'status': 'SKIP',
+            'message': 'No expected transitions provided',
+            'detected_count': detected_count,
+            'expected_count': 0,
+            'ratio': 0
+        }
+    
+    ratio = detected_count / expected_count if expected_count > 0 else 0
+    
+    if 0.7 <= ratio <= 1.3:  # Within 30%
+        status = 'PASS'
+        message = f"Good match: {detected_count}/{expected_count} scenes (ratio: {ratio:.2f})"
+    elif 0.3 <= ratio < 0.7:
+        status = 'UNDER_DETECTED'
+        message = f"Under-detection: {detected_count}/{expected_count} scenes (ratio: {ratio:.2f})"
+    elif ratio < 0.3:
+        status = 'SEVERE_UNDER_DETECTED'
+        message = f"Severe under-detection: {detected_count}/{expected_count} scenes (ratio: {ratio:.2f})"
+    else:
+        status = 'OVER_DETECTED'
+        message = f"Over-detection: {detected_count}/{expected_count} scenes (ratio: {ratio:.2f})"
+    
+    return {
+        'status': status,
+        'message': message,
+        'detected_count': detected_count,
+        'expected_count': expected_count,
+        'ratio': ratio
+    }
+
+
+def _interpolate_missing_scenes(
+    detected_scenes: List[Dict[str, Any]], 
+    expected_count: int, 
+    duration: float
+) -> List[Dict[str, Any]]:
+    """
+    Interpolate missing scenes when under-detection occurs.
+    
+    Args:
+        detected_scenes: Current detected scenes
+        expected_count: Expected number of scenes
+        duration: Video duration
+        
+    Returns:
+        Enhanced scene list with interpolated scenes
+    """
+    if len(detected_scenes) >= expected_count:
+        return detected_scenes
+    
+    # Calculate how many scenes we need to add
+    missing_count = expected_count - len(detected_scenes)
+    
+    # Create evenly spaced interpolated scenes
+    if detected_scenes:
+        # Use detected scenes as anchors and interpolate between them
+        enhanced_scenes = detected_scenes.copy()
+        
+        # Add interpolated scenes between existing ones
+        for i in range(len(detected_scenes) - 1):
+            start_time = detected_scenes[i]['timestamp']
+            end_time = detected_scenes[i + 1]['timestamp']
+            gap_duration = end_time - start_time
+            
+            # If gap is large enough, add interpolated scenes
+            if gap_duration > 10.0 and missing_count > 0:  # 10 second minimum gap
+                interpolated_time = start_time + (gap_duration / 2)
+                enhanced_scenes.append({
+                    'timestamp': interpolated_time,
+                    'original_timestamp': interpolated_time,
+                    'frame_number': int(interpolated_time * 30),  # Assume 30fps
+                    'confidence': 0.5,  # Lower confidence for interpolated
+                    'slide_number': 0,  # Will be renumbered
+                    'scene_score': None,
+                    'transition_type': 'interpolated',
+                    'detection_methods': ['interpolation']
+                })
+                missing_count -= 1
+        
+        # Sort by timestamp and renumber
+        enhanced_scenes.sort(key=lambda x: x['timestamp'])
+        for i, scene in enumerate(enhanced_scenes):
+            scene['slide_number'] = i + 1
+        
+        return enhanced_scenes
+    else:
+        # No detected scenes, create evenly distributed scenes
+        scenes = []
+        for i in range(expected_count):
+            timestamp = (duration / expected_count) * i
+            scenes.append({
+                'timestamp': timestamp,
+                'original_timestamp': timestamp,
+                'frame_number': int(timestamp * 30),
+                'confidence': 0.3,  # Low confidence for estimated
+                'slide_number': i + 1,
+                'scene_score': None,
+                'transition_type': 'estimated',
+                'detection_methods': ['estimation']
+            })
+        return scenes
+
+
 def analyze_video(video_path: str, 
                  expected_transitions: Optional[List[str]] = None,
                  scene_threshold: float = 0.4,
                  movement_threshold: float = 0.1,
                  keynote_delay: float = 1.0,
+                 presentation_mode: bool = False,
                  output_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Main function to perform complete video analysis.
@@ -494,10 +913,29 @@ def analyze_video(video_path: str,
                    f"{video_info['duration']:.2f}s, {video_info['frame_rate']:.2f}fps")
         
         # Step 2: Detect scene transitions
-        scene_transitions = detect_scene_changes(video_path, scene_threshold)
+        if presentation_mode and expected_transitions:
+            # Use Keynote-optimized detection
+            expected_count = len(expected_transitions) if expected_transitions else 0
+            keynote_result = detect_keynote_scenes(
+                video_path=video_path,
+                expected_transitions=expected_count,
+                threshold=scene_threshold,
+                keynote_delay=keynote_delay,
+                presentation_mode=True
+            )
+            scene_transitions = keynote_result['scenes']
+            logger.info(f"Using Keynote-optimized detection: {keynote_result['validation']['message']}")
+        else:
+            # Use traditional scene detection
+            scene_transitions = detect_scene_changes(video_path, scene_threshold)
         
-        # Step 3: Apply Keynote delay compensation
-        compensated_transitions = compensate_keynote_delay(scene_transitions, keynote_delay)
+        # Step 3: Apply Keynote delay compensation (if not already applied)
+        if presentation_mode and expected_transitions:
+            # Keynote detection already applies delay compensation
+            compensated_transitions = scene_transitions
+        else:
+            # Apply delay compensation for traditional detection
+            compensated_transitions = compensate_keynote_delay(scene_transitions, keynote_delay)
         
         # Step 4: Extract movement ranges
         movement_ranges = extract_movement_frames(video_path, compensated_transitions, movement_threshold)

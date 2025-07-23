@@ -136,17 +136,20 @@ Examples:
     # Basic analysis
     python cli/analyze_video.py data/presentation.mov
     
-    # With custom output path
-    python cli/analyze_video.py data/presentation.mov --output results/analysis.json
+    # Keynote-optimized analysis with expected transition count
+    python cli/analyze_video.py data/presentation.mov --presentation-mode --expected-transitions 18
     
     # With transcript validation
     python cli/analyze_video.py data/presentation.mov --transcript workspace/presentation_transcript.json
     
-    # Custom thresholds
-    python cli/analyze_video.py data/presentation.mov --scene-threshold 0.3 --movement-threshold 0.2
+    # Highly sensitive slide detection
+    python cli/analyze_video.py data/presentation.mov --scene-threshold 0.1 --presentation-mode
     
-    # Disable Keynote delay compensation
-    python cli/analyze_video.py data/presentation.mov --keynote-delay 0
+    # Full Keynote optimization suite
+    python cli/analyze_video.py data/presentation.mov --presentation-mode --enable-static-detection --enable-content-analysis
+    
+    # Custom output and validation
+    python cli/analyze_video.py data/presentation.mov --output results/analysis.json --expected-transitions 20
         """
     )
     
@@ -174,7 +177,7 @@ Examples:
         "--scene-threshold",
         type=float,
         default=0.4,
-        help="Scene detection threshold (0.0-1.0, higher = less sensitive, default: 0.4)"
+        help="Scene detection threshold (0.0-1.0, lower = more sensitive, default: 0.4)"
     )
     
     parser.add_argument(
@@ -210,6 +213,38 @@ Examples:
         help="Step ID for pipeline integration (default: analyze_video)"
     )
     
+    parser.add_argument(
+        "--presentation-mode",
+        action="store_true",
+        help="Enable Keynote-specific optimizations for slide-only videos"
+    )
+    
+    parser.add_argument(
+        "--expected-transitions",
+        type=int,
+        default=0,
+        help="Expected number of transitions for validation (overrides transcript count)"
+    )
+    
+    parser.add_argument(
+        "--enable-static-detection",
+        action="store_true",
+        help="Enable detection of 1-second static periods before transitions"
+    )
+    
+    parser.add_argument(
+        "--enable-content-analysis",
+        action="store_true", 
+        help="Enable histogram-based content change detection"
+    )
+    
+    parser.add_argument(
+        "--merge-tolerance",
+        type=float,
+        default=0.5,
+        help="Time tolerance for merging similar detections in seconds (default: 0.5)"
+    )
+    
     args = parser.parse_args()
     
     # Set logging level
@@ -232,6 +267,15 @@ Examples:
         except ValueError as e:
             logger.warning(f"Failed to load transcript: {e}")
             # Continue without transcript validation
+    
+    # Override with explicit expected count if provided
+    expected_count = args.expected_transitions
+    if expected_count > 0:
+        logger.info(f"Using explicit expected transition count: {expected_count}")
+    elif expected_transitions:
+        expected_count = len(expected_transitions)
+    else:
+        expected_count = 0
     
     # Generate output path if not provided
     output_path = args.output
@@ -257,7 +301,11 @@ Examples:
     logger.info(f"  Scene threshold: {args.scene_threshold}")
     logger.info(f"  Movement threshold: {args.movement_threshold}")
     logger.info(f"  Keynote delay: {args.keynote_delay}s")
-    logger.info(f"  Expected transitions: {len(expected_transitions) if expected_transitions else 'None'}")
+    logger.info(f"  Expected transitions: {expected_count if expected_count > 0 else 'None'}")
+    logger.info(f"  Presentation mode: {args.presentation_mode}")
+    logger.info(f"  Static detection: {args.enable_static_detection}")
+    logger.info(f"  Content analysis: {args.enable_content_analysis}")
+    logger.info(f"  Merge tolerance: {args.merge_tolerance}s")
     
     if args.dry_run:
         logger.info("Dry run completed successfully")
@@ -273,6 +321,7 @@ Examples:
             scene_threshold=args.scene_threshold,
             movement_threshold=args.movement_threshold,
             keynote_delay=args.keynote_delay,
+            presentation_mode=args.presentation_mode,
             output_path=output_path
         )
         

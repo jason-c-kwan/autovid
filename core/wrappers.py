@@ -686,6 +686,7 @@ def run_splice_audio(
 
 def analyze_video(video_path, transcript_path=None, output_path=None, 
                  scene_threshold=0.4, movement_threshold=0.1, keynote_delay=1.0,
+                 presentation_mode=False, expected_transitions=0,
                  step_id="analyze_video"):
     """
     Calls cli/analyze_video.py to analyze video for scene transitions and movement ranges.
@@ -697,6 +698,8 @@ def analyze_video(video_path, transcript_path=None, output_path=None,
         scene_threshold (float, optional): Scene detection sensitivity. Defaults to 0.4.
         movement_threshold (float, optional): Movement detection sensitivity. Defaults to 0.1.
         keynote_delay (float, optional): Keynote delay compensation in seconds. Defaults to 1.0.
+        presentation_mode (bool, optional): Enable Keynote-specific optimizations. Defaults to False.
+        expected_transitions (int, optional): Expected number of transitions for validation. Defaults to 0.
         step_id (str, optional): Step identifier for pipeline integration. Defaults to "analyze_video".
     
     Returns:
@@ -721,6 +724,12 @@ def analyze_video(video_path, transcript_path=None, output_path=None,
         '--keynote-delay', str(keynote_delay),
         '--step-id', step_id
     ])
+    
+    if presentation_mode:
+        command.append('--presentation-mode')
+    
+    if expected_transitions > 0:
+        command.extend(['--expected-transitions', str(expected_transitions)])
     
     try:
         result = subprocess.run(
