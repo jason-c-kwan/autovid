@@ -269,24 +269,24 @@ def main():
                     logging.warning(f"Skipping QC step '{step_id}': No TTS manifests available.")
                     continue
                 
-                # Extract parameters from pipeline config
+                # Extract parameters from pipeline config (new format)
                 step_params = step.get("parameters", {})
-                substeps = step.get("substeps", [])
                 
-                # Find QC detection substep parameters
-                detect_params = {}
-                detect_thresholds = {}
-                for substep in substeps:
-                    if substep.get("id") == "qc_pronounce_detect":
-                        detect_params = substep.get("parameters", {})
-                        detect_thresholds = substep.get("thresholds", {})
-                        break
-                
-                # Set QC parameters with fallbacks
-                mos_threshold = detect_thresholds.get("mos", 3.5)
-                wer_threshold = detect_thresholds.get("wer", 0.10)
-                whisperx_model = detect_params.get("model", "large-v2")
+                # Set QC parameters with fallbacks from new configuration format
+                mos_threshold = step_params.get("mos_threshold", 3.5)
+                wer_threshold = step_params.get("wer_threshold", 0.10)
                 max_attempts = step_params.get("max_attempts", 3)
+                whisper_model = step_params.get("whisper_model", "large-v3")
+                enable_transcription = step_params.get("enable_transcription", True)
+                transcription_timeout = step_params.get("transcription_timeout", 30)
+                retry_with_phonemes = step_params.get("retry_with_phonemes", True)
+                retry_different_engine = step_params.get("retry_different_engine", True)
+                preserve_original_on_failure = step_params.get("preserve_original_on_failure", False)
+                detect_clipping = step_params.get("detect_clipping", True)
+                detect_silence = step_params.get("detect_silence", True)
+                silence_threshold = step_params.get("silence_threshold", -40)
+                min_chunk_duration = step_params.get("min_chunk_duration", 0.5)
+                max_chunk_duration = step_params.get("max_chunk_duration", 30.0)
                 
                 # Create QC output directory
                 qc_output_dir = os.path.join(workspace_root, "02_qc_audio")
@@ -314,8 +314,17 @@ def main():
                             mos_threshold=mos_threshold,
                             wer_threshold=wer_threshold,
                             max_attempts=max_attempts,
-                            enable_transcription=True,
-                            whisperx_model=whisperx_model,
+                            whisper_model=whisper_model,
+                            enable_transcription=enable_transcription,
+                            transcription_timeout=transcription_timeout,
+                            retry_with_phonemes=retry_with_phonemes,
+                            retry_different_engine=retry_different_engine,
+                            preserve_original_on_failure=preserve_original_on_failure,
+                            detect_clipping=detect_clipping,
+                            detect_silence=detect_silence,
+                            silence_threshold=silence_threshold,
+                            min_chunk_duration=min_chunk_duration,
+                            max_chunk_duration=max_chunk_duration,
                             step_id=step_id
                         )
                         

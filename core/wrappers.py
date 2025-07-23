@@ -871,12 +871,21 @@ def run_audio_qc(
     mos_threshold: float = 3.5,
     wer_threshold: float = 0.10,
     max_attempts: int = 3,
+    whisper_model: str = "large-v3",
     enable_transcription: bool = True,
-    whisperx_model: str = "large-v2",
+    transcription_timeout: int = 30,
+    retry_with_phonemes: bool = True,
+    retry_different_engine: bool = True,
+    preserve_original_on_failure: bool = False,
+    detect_clipping: bool = True,
+    detect_silence: bool = True,
+    silence_threshold: float = -40,
+    min_chunk_duration: float = 0.5,
+    max_chunk_duration: float = 30.0,
     step_id: str = "qc_pronounce"
 ) -> Dict[str, Any]:
     """
-    Quality control wrapper for TTS audio validation.
+    Quality control wrapper for TTS audio validation with comprehensive features.
     
     Args:
         input_manifest: Path to TTS audio manifest JSON
@@ -884,8 +893,17 @@ def run_audio_qc(
         mos_threshold: Minimum MOS score threshold
         wer_threshold: Maximum WER threshold
         max_attempts: Maximum re-synthesis attempts
+        whisper_model: WhisperX model for transcription
         enable_transcription: Enable WhisperX transcription for WER
-        whisperx_model: WhisperX model for transcription
+        transcription_timeout: Timeout for transcription in seconds
+        retry_with_phonemes: Use phoneme hints for failed chunks
+        retry_different_engine: Try alternate TTS engine if available
+        preserve_original_on_failure: Keep original audio if all retries fail
+        detect_clipping: Detect audio clipping
+        detect_silence: Detect unexpected silence periods
+        silence_threshold: dB threshold for silence detection
+        min_chunk_duration: Minimum expected chunk duration (seconds)
+        max_chunk_duration: Maximum expected chunk duration (seconds)
         step_id: Step identifier
         
     Returns:
@@ -903,12 +921,27 @@ def run_audio_qc(
         "--mos-threshold", str(mos_threshold),
         "--wer-threshold", str(wer_threshold),
         "--max-attempts", str(max_attempts),
-        "--whisperx-model", whisperx_model,
+        "--whisper-model", whisper_model,
+        "--transcription-timeout", str(transcription_timeout),
+        "--silence-threshold", str(silence_threshold),
+        "--min-chunk-duration", str(min_chunk_duration),
+        "--max-chunk-duration", str(max_chunk_duration),
         "--step-id", step_id
     ]
     
+    # Add boolean flags
     if enable_transcription:
         cmd.append("--enable-transcription")
+    if retry_with_phonemes:
+        cmd.append("--retry-with-phonemes")
+    if retry_different_engine:
+        cmd.append("--retry-different-engine")
+    if preserve_original_on_failure:
+        cmd.append("--preserve-original-on-failure")
+    if detect_clipping:
+        cmd.append("--detect-clipping")
+    if detect_silence:
+        cmd.append("--detect-silence")
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)

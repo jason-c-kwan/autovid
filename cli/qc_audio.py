@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.qc_audio import score_mos, is_bad_alignment
 from core.wrappers import whisper_transcribe
+import librosa
+import numpy as np
 
 def transcribe_audio_chunk(wav_path: str, model: str = "large-v2") -> Dict[str, Any]:
     """
@@ -109,8 +111,27 @@ def process_audio_chunk(chunk: Dict[str, Any], args: argparse.Namespace) -> Dict
             except:
                 wer_score = 0.0 if wer_pass else 1.0
     
+    # Additional quality checks
+    clipping_result = {}
+    silence_result = {}
+    duration_result = {}
+    
+    if args.detect_clipping:
+        clipping_result = detect_clipping(wav_path, threshold=0.95)
+    
+    if args.detect_silence:
+        silence_result = detect_silence(wav_path, args.silence_threshold, min_duration=0.1)
+    
+    # Duration validation
+    duration_result = validate_duration(wav_path, args.min_chunk_duration, args.max_chunk_duration)
+    
+    # Additional pass/fail criteria
+    clipping_pass = not clipping_result.get("has_clipping", False) if args.detect_clipping else True
+    silence_pass = not silence_result.get("has_unexpected_silence", False) if args.detect_silence else True
+    duration_pass = duration_result.get("duration_valid", True)
+    
     # Determine overall pass/fail
-    overall_pass = mos_pass and wer_pass
+    overall_pass = mos_pass and wer_pass and clipping_pass and silence_pass and duration_pass
     
     qc_result = {
         "chunk_id": chunk_id,
@@ -121,6 +142,12 @@ def process_audio_chunk(chunk: Dict[str, Any], args: argparse.Namespace) -> Dict
         "mos_pass": mos_pass,
         "wer_score": wer_score,
         "wer_pass": wer_pass,
+        "clipping_analysis": clipping_result,
+        "clipping_pass": clipping_pass,
+        "silence_analysis": silence_result,
+        "silence_pass": silence_pass,
+        "duration_analysis": duration_result,
+        "duration_pass": duration_pass,
         "overall_pass": overall_pass,
         "attempts": 1,
         "status": "pass" if overall_pass else "fail"
@@ -149,15 +176,179 @@ def attempt_resynthesis(original_chunk: Dict[str, Any], qc_result: Dict[str, Any
     
     return qc_result
 
+
+def detect_clipping(wav_path: str, threshold: float = 0.95) -> Dict[str, Any]:
+    """
+    Detect audio clipping by analyzing peak amplitudes.
+    
+    Args:
+        wav_path: Path to audio file
+        threshold: Amplitude threshold for clipping detection (0.0-1.0)
+        
+    Returns:
+        Dict with clipping analysis results
+    """
+    try:
+        audio, sr = librosa.load(wav_path, sr=None)
+        
+        # Find peaks above threshold
+        clipping_samples = np.abs(audio) >= threshold
+        clipping_count = np.sum(clipping_samples)
+        clipping_percentage = (clipping_count / len(audio)) * 100
+        
+        return {
+            "has_clipping": clipping_count > 0,
+            "clipping_percentage": clipping_percentage,
+            "clipping_samples": int(clipping_count),
+            "total_samples": len(audio),
+            "threshold_used": threshold
+        }
+    except Exception as e:
+        logging.error(f"Error detecting clipping in {wav_path}: {e}")
+        return {
+            "has_clipping": False,
+            "clipping_percentage": 0.0,
+            "error": str(e)
+        }
+
+
+def detect_silence(wav_path: str, silence_threshold: float = -40, min_duration: float = 0.1) -> Dict[str, Any]:
+    """
+    Detect unexpected silence periods in audio.
+    
+    Args:
+        wav_path: Path to audio file
+        silence_threshold: dB threshold for silence detection
+        min_duration: Minimum duration to consider as silence (seconds)
+        
+    Returns:
+        Dict with silence analysis results
+    """
+    try:
+        audio, sr = librosa.load(wav_path, sr=None)
+        
+        # Convert to dB
+        audio_db = librosa.amplitude_to_db(np.abs(audio), ref=np.max)
+        
+        # Find silent samples
+        silent_samples = audio_db <= silence_threshold
+        
+        # Find continuous silent periods
+        silent_periods = []
+        in_silence = False
+        silence_start = 0
+        
+        for i, is_silent in enumerate(silent_samples):
+            if is_silent and not in_silence:
+                silence_start = i
+                in_silence = True
+            elif not is_silent and in_silence:
+                silence_duration = (i - silence_start) / sr
+                if silence_duration >= min_duration:
+                    silent_periods.append({
+                        "start_time": silence_start / sr,
+                        "end_time": i / sr,
+                        "duration": silence_duration
+                    })
+                in_silence = False
+        
+        # Handle silence at end of file
+        if in_silence:
+            silence_duration = (len(silent_samples) - silence_start) / sr
+            if silence_duration >= min_duration:
+                silent_periods.append({
+                    "start_time": silence_start / sr,
+                    "end_time": len(silent_samples) / sr,
+                    "duration": silence_duration
+                })
+        
+        total_silence_duration = sum(period["duration"] for period in silent_periods)
+        silence_percentage = (total_silence_duration / (len(audio) / sr)) * 100
+        
+        return {
+            "has_unexpected_silence": len(silent_periods) > 0,
+            "silent_periods": silent_periods,
+            "total_silence_duration": total_silence_duration,
+            "silence_percentage": silence_percentage,
+            "threshold_used": silence_threshold
+        }
+    except Exception as e:
+        logging.error(f"Error detecting silence in {wav_path}: {e}")
+        return {
+            "has_unexpected_silence": False,
+            "silent_periods": [],
+            "error": str(e)
+        }
+
+
+def validate_duration(wav_path: str, min_duration: float, max_duration: float) -> Dict[str, Any]:
+    """
+    Validate audio chunk duration is within expected range.
+    
+    Args:
+        wav_path: Path to audio file
+        min_duration: Minimum expected duration (seconds)
+        max_duration: Maximum expected duration (seconds)
+        
+    Returns:
+        Dict with duration validation results
+    """
+    try:
+        audio, sr = librosa.load(wav_path, sr=None)
+        duration = len(audio) / sr
+        
+        is_valid = min_duration <= duration <= max_duration
+        
+        return {
+            "duration_valid": is_valid,
+            "actual_duration": duration,
+            "min_expected": min_duration,
+            "max_expected": max_duration,
+            "duration_issue": None if is_valid else (
+                "too_short" if duration < min_duration else "too_long"
+            )
+        }
+    except Exception as e:
+        logging.error(f"Error validating duration for {wav_path}: {e}")
+        return {
+            "duration_valid": False,
+            "actual_duration": 0.0,
+            "error": str(e)
+        }
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Audio Quality Control for TTS")
+    parser = argparse.ArgumentParser(description="Audio Quality Control for TTS with comprehensive features")
+    
+    # Required arguments
     parser.add_argument("--input", required=True, help="Input TTS manifest JSON file")
     parser.add_argument("--output", required=True, help="Output directory for QC results")
+    
+    # Quality thresholds
     parser.add_argument("--mos-threshold", type=float, default=3.5, help="Minimum MOS score threshold")
     parser.add_argument("--wer-threshold", type=float, default=0.10, help="Maximum WER threshold")
     parser.add_argument("--max-attempts", type=int, default=3, help="Maximum re-synthesis attempts")
+    
+    # Transcription settings
+    parser.add_argument("--whisper-model", default="large-v3", help="WhisperX model for transcription")
     parser.add_argument("--enable-transcription", action="store_true", help="Enable WER checking via transcription")
-    parser.add_argument("--whisperx-model", default="large-v2", help="WhisperX model for transcription")
+    parser.add_argument("--transcription-timeout", type=int, default=30, help="Timeout for transcription in seconds")
+    
+    # Re-synthesis strategy flags
+    parser.add_argument("--retry-with-phonemes", action="store_true", help="Use phoneme hints for failed chunks")
+    parser.add_argument("--retry-different-engine", action="store_true", help="Try alternate TTS engine if available")
+    parser.add_argument("--preserve-original-on-failure", action="store_true", help="Keep original audio if all retries fail")
+    
+    # Audio issue detection
+    parser.add_argument("--detect-clipping", action="store_true", help="Detect audio clipping")
+    parser.add_argument("--detect-silence", action="store_true", help="Detect unexpected silence periods")
+    parser.add_argument("--silence-threshold", type=float, default=-40, help="dB threshold for silence detection")
+    
+    # Duration validation
+    parser.add_argument("--min-chunk-duration", type=float, default=0.5, help="Minimum expected chunk duration (seconds)")
+    parser.add_argument("--max-chunk-duration", type=float, default=30.0, help="Maximum expected chunk duration (seconds)")
+    
+    # System settings
     parser.add_argument("--step-id", default="qc_pronounce", help="Step identifier for logging")
     
     args = parser.parse_args()
@@ -210,8 +401,17 @@ def main():
             "mos_threshold": args.mos_threshold,
             "wer_threshold": args.wer_threshold,
             "max_attempts": args.max_attempts,
+            "whisper_model": args.whisper_model,
             "enable_transcription": args.enable_transcription,
-            "whisperx_model": args.whisperx_model
+            "transcription_timeout": args.transcription_timeout,
+            "retry_with_phonemes": args.retry_with_phonemes,
+            "retry_different_engine": args.retry_different_engine,
+            "preserve_original_on_failure": args.preserve_original_on_failure,
+            "detect_clipping": args.detect_clipping,
+            "detect_silence": args.detect_silence,
+            "silence_threshold": args.silence_threshold,
+            "min_chunk_duration": args.min_chunk_duration,
+            "max_chunk_duration": args.max_chunk_duration
         },
         "summary": {
             "chunks_processed": chunks_processed,
