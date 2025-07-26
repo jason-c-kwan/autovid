@@ -68,11 +68,11 @@ def extract_transcript(pptx_path, output_path=None, cue_token="[transition]", st
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error extracting transcript: {e.stderr}") from e
 
-def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path: str = "config/pipeline.yaml"):
+def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path: str = "config/pipeline.yaml", chunk_mode: str = "sentence"):
     """
-    Processes transcript through sentence chunking and TTS conversion pipeline.
+    Processes transcript through text chunking and TTS conversion pipeline.
     
-    1. Runs transcript_preprocess.py with sentence chunking
+    1. Runs transcript_preprocess.py with specified chunking mode
     2. Passes each chunk to piper_tts.py
     3. Aggregates TTS outputs into a manifest
     
@@ -81,6 +81,7 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path:
         output_path (str, optional): Output file for TTS manifest
         step_id (str, optional): Pipeline step identifier
         config_path (str, optional): Path to the pipeline configuration YAML file. Defaults to "config/pipeline.yaml".
+        chunk_mode (str, optional): Chunking mode ('sentence' or 'slide'). Defaults to 'sentence'.
     
     Returns:
         dict: Aggregated manifest containing all TTS outputs
@@ -96,7 +97,7 @@ def piper_tts(transcript_path, output_path=None, step_id="tts_run", config_path:
     preprocess_cmd = [
         sys.executable, 'cli/transcript_preprocess.py',
         transcript_path, # Positional argument for input file
-        '--chunk_mode', 'sentence'
+        '--chunk_mode', chunk_mode
         # Removed '--step_id' as it's not an accepted argument
     ]
     
@@ -759,17 +760,17 @@ def analyze_video(video_path, transcript_path=None, output_path=None,
         raise RuntimeError(f"Video analysis failed: {e.stderr}") from e
 
 
-def sync_video(video_path: str,
+def sync_slides(video_path: str,
                audio_path: str,
                output_path: str,
                video_manifest: str = None,
                audio_manifest: str = None,
-               step_id: str = "sync_video",
+               step_id: str = "sync_slides",
                config_path: str = "config/pipeline.yaml") -> Dict[str, Any]:
     """
     Synchronizes video with processed audio using the AutoVid sync engine.
     
-    This wrapper function calls cli/sync_video.py to perform video-audio synchronization
+    This wrapper function calls cli/sync_slides.py to perform video-audio synchronization
     using timing manifests from video analysis and audio splicing steps. It supports
     both basic and advanced synchronization modes with comprehensive validation.
     
@@ -779,7 +780,7 @@ def sync_video(video_path: str,
         output_path (str): Path for output synchronized video
         video_manifest (str, optional): Path to video analysis manifest
         audio_manifest (str, optional): Path to audio splice manifest
-        step_id (str, optional): Identifier for the sync step. Defaults to "sync_video"
+        step_id (str, optional): Identifier for the sync step. Defaults to "sync_slides"
         config_path (str, optional): Path to pipeline configuration. Defaults to "config/pipeline.yaml"
         
     Returns:
@@ -793,7 +794,7 @@ def sync_video(video_path: str,
     import os
     
     # Build command
-    command = [sys.executable, 'cli/sync_video.py', video_path, audio_path, output_path]
+    command = [sys.executable, 'cli/sync_slides.py', video_path, audio_path, output_path]
     
     # Add optional manifests
     if video_manifest:

@@ -558,7 +558,7 @@ def main():
 
                 logging.info(f"Video analysis step '{step_id}' completed. Analyzed {len(all_video_analyses)} videos.")
 
-            elif step_id == "sync_video":
+            elif step_id == "sync_slides":
                 # Check if we have the required inputs
                 required_inputs = []
                 missing_inputs = []
@@ -596,7 +596,7 @@ def main():
                     missing_inputs.append("Video analysis manifests from analyze_video step")
                 
                 if missing_inputs:
-                    logging.warning(f"Skipping sync_video step '{step_id}': Missing inputs: {missing_inputs}")
+                    logging.warning(f"Skipping sync_slides step '{step_id}': Missing inputs: {missing_inputs}")
                     continue
                 
                 # Perform video synchronization for each stem
@@ -663,7 +663,7 @@ def main():
                         output_video_path = os.path.join(sync_output_dir, f"{stem}_synchronized.mp4")
                         
                         # Perform synchronization
-                        sync_manifest = core.wrappers.sync_video(
+                        sync_manifest = core.wrappers.sync_slides(
                             video_path=video_path,
                             audio_path=spliced_audio_path,
                             output_path=output_video_path,

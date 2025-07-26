@@ -95,7 +95,7 @@ def process_audio_chunk(chunk: Dict[str, Any], args: argparse.Namespace) -> Dict
     transcribed_text = ""
     
     if args.enable_transcription:
-        transcription_result = transcribe_audio_chunk(wav_path, args.whisperx_model)
+        transcription_result = transcribe_audio_chunk(wav_path, args.whisper_model)
         transcribed_text = transcription_result['text']
         
         if transcribed_text and original_text:

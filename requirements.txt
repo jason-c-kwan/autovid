@@ -22,3 +22,10 @@ soundfile
 librosa
 torch
 faiss-cpu
+tensorflow
+
+# Environment Setup Notes:
+# 1. Set PYTHONPATH for module imports:
+#    conda env config vars set PYTHONPATH=/home/jason/git_repos/autovid -n autovid
+# 2. Reactivate environment after setting PYTHONPATH:
+#    conda deactivate && conda activate autovid

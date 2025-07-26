@@ -59,10 +59,81 @@ autovid/
 - Run tests with: `python -m pytest tests/`
 - All major components have corresponding test files
 
-### Current Implementation Status
-- **COMPLETE**: Dataset validation, PPTX processing, TTS generation, audio QC, transcription
-- **IMPLEMENTED BUT NEEDS CONFIGURATION**: Voice conversion (RVC) - environment and code ready, needs GPU config fix
-- **MISSING**: Audio splicing, video sync, final rendering, subtitle generation
+### Current Pipeline Status (as of 2025-01-26)
+#### Working Steps ✅
+- `check_datasets` - Dataset validation  
+- `extract_transcript` - PowerPoint note extraction
+- `tts_run` - Text-to-speech generation (Piper/Orpheus)
+- `qc_pronounce` - Audio quality control 
+- `apply_rvc` - Voice conversion (produces individual chunks)
+
+#### Partially Working Steps ⚠️
+- `splice_audio` - Audio chunk assembly (implemented but path issues)
+- `analyze_video` - Video scene detection (implemented but not connected)
+
+#### Broken/Missing Steps ❌
+- `sync_slides` - Step name mismatch with conductor (`sync_video`)
+- `make_srt` - Subtitle generation (configured but not implemented)
+
+#### Known Issues
+- Step name mismatch: config defines `sync_slides`, conductor implements `sync_video`
+- RVC manifest path handling incorrect in splice_audio step
+- See IMPLEMENTATION_PLAN.md for detailed fixes needed
+
+### Pipeline Debugging
+#### Testing the Complete Pipeline
+```bash
+# Activate environment and test full pipeline
+source ~/.bashrc && eval "$(/home/jason/mambaforge/bin/conda shell.bash hook)" && conda activate autovid
+cd /home/jason/git_repos/autovid
+PYTHONPATH=/home/jason/git_repos/autovid python autogen/conductor.py
+```
+
+**Note**: This command will run the entire pipeline from start to finish. Currently it stops after RVC conversion due to the issues described in IMPLEMENTATION_PLAN.md.
+
+#### Current Expected Output Structure
+```
+workspace/
+├── 00_check_datasets/     # Dataset validation manifests
+├── 01_transcripts/        # Extracted PPTX notes
+├── 02_tts_audio/          # TTS generated audio chunks
+├── 02_qc_audio/           # Quality control results
+├── 03_rvc_audio/          # RVC converted audio chunks ← CURRENTLY STOPS HERE
+├── 04_spliced_audio/      # Assembled continuous narration (NOT WORKING)
+├── 05_video_analysis/     # Scene detection results (NOT WORKING)
+└── 06_synchronized_videos/ # Final synchronized MP4s (NOT WORKING)
+```
+
+#### Pipeline Execution Status
+- **Currently working**: Steps 1-5 (through RVC conversion)  
+- **Currently failing**: Steps 6-8 (splice_audio, analyze_video, sync_slides)
+- **After fixes**: Should produce final MP4s in `workspace/06_synchronized_videos/`
+
+#### Key Configuration Details
+##### Pipeline Steps Order (config/pipeline.yaml)
+1. `check_datasets`
+2. `extract_transcript` 
+3. `tts_run`
+4. `qc_pronounce`
+5. `apply_rvc`
+6. `splice_audio`
+7. `analyze_video`
+8. `sync_slides` ⚠️ **MISMATCH**: Conductor implements `sync_video`
+9. `make_srt` ❌ **MISSING**: Not implemented in conductor
+
+##### Critical Path Issues
+- Line 283 in `config/pipeline.yaml`: defines `sync_slides`
+- Line 561 in `autogen/conductor.py`: implements `sync_video` 
+- Line 436 in `autogen/conductor.py`: hardcoded RVC manifest path
+
+#### For Next Implementation Session
+1. **Primary Goal**: Complete pipeline execution end-to-end
+2. **Critical Tasks**: See IMPLEMENTATION_PLAN.md Phase 1 checklist
+3. **Expected Outcome**: Working MP4 files in `workspace/06_synchronized_videos/`
+4. **Key Files to Modify**: 
+   - `autogen/conductor.py` (fix step names, add sync_slides)
+   - `core/wrappers.py` (add sync_slides wrapper)
+   - `config/pipeline.yaml` (remove make_srt)
 
 ### Environment Setup
 AutoVid uses a dual-environment setup to handle dependency conflicts between RVC and other components:
