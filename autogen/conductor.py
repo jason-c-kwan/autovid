@@ -232,12 +232,17 @@ def main():
                                 temp_transcript_file_path = tmp_transcript_file.name
                             
                             try:
+                                # Get chunk_mode from step parameters, default to 'sentence'
+                                chunk_mode = step_params.get("chunk_mode", "sentence")
+                                
                                 manifest_dict = core.wrappers.piper_tts(
                                     transcript_path=temp_transcript_file_path,
                                     output_path=current_tts_manifest_path,
                                     step_id=step_id, # Pass the main step_id for config lookup
-                                    config_path=args.pipeline_config
+                                    config_path=args.pipeline_config,
+                                    chunk_mode=chunk_mode
                                 )
+                                manifest_dict["manifest_path"] = current_tts_manifest_path
                                 all_tts_manifests.append(manifest_dict)
                                 logging.info(f"Piper TTS successful for transcript {idx+1}. Manifest: {current_tts_manifest_path}")
                             finally:
@@ -250,6 +255,7 @@ def main():
                                 step_id=step_id, # Pass the main step_id
                                 config_path=args.pipeline_config
                             )
+                            manifest_dict["manifest_path"] = current_tts_manifest_path
                             all_tts_manifests.append(manifest_dict)
                             logging.info(f"Orpheus TTS successful for transcript {idx+1}. Manifest: {current_tts_manifest_path}")
                         
