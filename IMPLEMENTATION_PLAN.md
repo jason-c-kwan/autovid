@@ -68,10 +68,10 @@ The AutoVid pipeline currently runs successfully through the RVC step, producing
 - [ ] Return structured result dictionary
 
 #### Task 4: Fix RVC Manifest Path Issue
-- [ ] Replace hardcoded path in `autogen/conductor.py` line 436
-- [ ] Use `rvc_manifest.get("manifest_path")` from `all_rvc_manifests`
-- [ ] Add null check and error handling for missing paths
-- [ ] Test with actual RVC output structure
+- [x] Replace hardcoded path in `autogen/conductor.py` line 436
+- [x] Use `rvc_manifest.get("manifest_path")` from `all_rvc_manifests`
+- [x] Add null check and error handling for missing paths
+- [x] Test with actual RVC output structure
 
 #### Task 5: Remove Undefined make_srt Step
 - [ ] Remove `- id: make_srt` from `config/pipeline.yaml` line 307

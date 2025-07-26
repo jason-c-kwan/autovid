@@ -432,8 +432,11 @@ def main():
                 logging.info(f"Audio splicing output directory: {splice_output_dir}")
 
                 for idx, rvc_manifest in enumerate(all_rvc_manifests):
-                    # Generate RVC manifest path for splicing
-                    rvc_manifest_path = os.path.join(workspace_root, "03_rvc_audio", "rvc_conversion_manifest.json")
+                    # Get RVC manifest path from the manifest itself
+                    rvc_manifest_path = rvc_manifest.get("manifest_path")
+                    if not rvc_manifest_path:
+                        logging.warning(f"No manifest path in RVC manifest {idx+1}, skipping splice")
+                        continue
                     
                     try:
                         logging.info(f"Splicing RVC audio chunks {idx+1}/{len(all_rvc_manifests)}.")
