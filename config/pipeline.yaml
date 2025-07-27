@@ -304,4 +304,3 @@ steps:
       gap_handling:
         default_gap_type: static_hold # Default gap type
         max_gap_duration: 10.0        # Maximum allowed gap duration
-  - id: make_srt

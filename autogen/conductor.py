@@ -114,6 +114,14 @@ def main():
         logging.error("Workspace root not specified. Use --workspace-root or set in pipeline config.")
         sys.exit(1)
 
+    # Initialize pipeline variables to persist across steps
+    stems = []
+    all_transcripts = []
+    all_tts_manifests = []
+    all_rvc_manifests = []
+    all_splice_manifests = []
+    all_video_analyses = []
+    
     # Execute pipeline steps
     for step in steps:
         step_id = step.get("id")
@@ -129,7 +137,6 @@ def main():
 
                 # Call check_datasets and get the list of stems
                 json_string_result = core.wrappers.check_datasets(data_dir, check_datasets_manifest_path)
-                stems = [] # Initialize stems as an empty list
                 try:
                     result_data = json.loads(json_string_result)
                     if isinstance(result_data, dict) and "pairs" in result_data and isinstance(result_data["pairs"], list):
@@ -143,8 +150,7 @@ def main():
                     logging.error(f"Failed to parse JSON from check_datasets: {json_string_result}")
 
             elif step_id == "extract_transcript":
-                if 'stems' in locals() and stems: # Ensure stems were obtained from check_datasets
-                    all_transcripts = []
+                if stems: # Ensure stems were obtained from check_datasets
                     for stem in stems:
                         pptx_path = os.path.join(data_dir, f"{stem}.pptx")
                         logging.info(f"Extracting transcript for {pptx_path}")
@@ -201,11 +207,9 @@ def main():
                     logging.error(f"TTS engine not specified in parameters for step '{step_id}'. Skipping.")
                     continue
 
-                if 'all_transcripts' not in locals() or not all_transcripts:
+                if not all_transcripts:
                     logging.warning(f"Skipping TTS step '{step_id}': No transcripts available from previous steps.")
                     continue
-
-                all_tts_manifests = []
                 tts_manifest_output_dir = os.path.join(workspace_root, "02_tts_audio")
                 os.makedirs(tts_manifest_output_dir, exist_ok=True)
                 logging.info(f"TTS output directory: {tts_manifest_output_dir}")
@@ -243,6 +247,9 @@ def main():
                                     chunk_mode=chunk_mode
                                 )
                                 manifest_dict["manifest_path"] = current_tts_manifest_path
+                                # Save the updated manifest with manifest_path back to file
+                                with open(current_tts_manifest_path, 'w') as f:
+                                    json.dump(manifest_dict, f, indent=2)
                                 all_tts_manifests.append(manifest_dict)
                                 logging.info(f"Piper TTS successful for transcript {idx+1}. Manifest: {current_tts_manifest_path}")
                             finally:
@@ -256,6 +263,9 @@ def main():
                                 config_path=args.pipeline_config
                             )
                             manifest_dict["manifest_path"] = current_tts_manifest_path
+                            # Save the updated manifest with manifest_path back to file
+                            with open(current_tts_manifest_path, 'w') as f:
+                                json.dump(manifest_dict, f, indent=2)
                             all_tts_manifests.append(manifest_dict)
                             logging.info(f"Orpheus TTS successful for transcript {idx+1}. Manifest: {current_tts_manifest_path}")
                         
@@ -271,7 +281,7 @@ def main():
                 # The 'all_tts_manifests' list is now available for downstream steps if they are designed to use it.
 
             elif step_id == "qc_pronounce":
-                if 'all_tts_manifests' not in locals() or not all_tts_manifests:
+                if not all_tts_manifests:
                     logging.warning(f"Skipping QC step '{step_id}': No TTS manifests available.")
                     continue
                 
@@ -385,11 +395,9 @@ def main():
                     logging.warning("No audio chunks processed during QC step.")
 
             elif step_id == "apply_rvc":
-                if 'all_tts_manifests' not in locals() or not all_tts_manifests:
+                if not all_tts_manifests:
                     logging.warning(f"Skipping RVC step '{step_id}': No TTS manifests available from previous steps.")
                     continue
-
-                all_rvc_manifests = []
                 rvc_output_dir = os.path.join(workspace_root, "03_rvc_audio")
                 os.makedirs(rvc_output_dir, exist_ok=True)
                 logging.info(f"RVC output directory: {rvc_output_dir}")
@@ -422,20 +430,18 @@ def main():
                 logging.info(f"RVC step '{step_id}' completed. Generated {len(all_rvc_manifests)} RVC manifests.")
 
             elif step_id == "splice_audio":
-                if 'all_rvc_manifests' not in locals() or not all_rvc_manifests:
+                if not all_rvc_manifests:
                     logging.warning(f"Skipping audio splicing step '{step_id}': No RVC manifests available from previous steps.")
                     continue
-
-                all_splice_manifests = []
                 splice_output_dir = os.path.join(workspace_root, "04_spliced_audio")
                 os.makedirs(splice_output_dir, exist_ok=True)
                 logging.info(f"Audio splicing output directory: {splice_output_dir}")
 
                 for idx, rvc_manifest in enumerate(all_rvc_manifests):
-                    # Get RVC manifest path from the manifest itself
-                    rvc_manifest_path = rvc_manifest.get("manifest_path")
-                    if not rvc_manifest_path:
-                        logging.warning(f"No manifest path in RVC manifest {idx+1}, skipping splice")
+                    # Get RVC manifest path - should be the actual file path where the manifest was saved
+                    rvc_manifest_path = os.path.join(rvc_output_dir, "rvc_conversion_manifest.json")
+                    if not os.path.exists(rvc_manifest_path):
+                        logging.warning(f"RVC manifest file not found at {rvc_manifest_path}, skipping splice")
                         continue
                     
                     try:
@@ -463,11 +469,9 @@ def main():
                 logging.info(f"Audio splicing step '{step_id}' completed. Generated {len(all_splice_manifests)} splice manifests.")
 
             elif step_id == "analyze_video":
-                if 'stems' not in locals() or not stems:
+                if not stems:
                     logging.warning(f"Skipping video analysis step '{step_id}': No stems available from check_datasets.")
                     continue
-
-                all_video_analyses = []
                 video_analysis_output_dir = os.path.join(workspace_root, "05_video_analysis")
                 os.makedirs(video_analysis_output_dir, exist_ok=True)
                 logging.info(f"Video analysis output directory: {video_analysis_output_dir}")
@@ -567,7 +571,7 @@ def main():
                 missing_inputs = []
                 
                 # Check for video files from stems
-                if 'stems' in locals() and stems:
+                if stems:
                     video_files = []
                     for stem in stems:
                         # Look for video file (.mov or .mp4)
@@ -587,13 +591,13 @@ def main():
                     missing_inputs.append("No stems available from check_datasets")
                 
                 # Check for audio splice manifests
-                if 'all_splice_manifests' in locals() and all_splice_manifests:
+                if all_splice_manifests:
                     audio_manifests = all_splice_manifests
                 else:
                     missing_inputs.append("Audio splice manifests from splice_audio step")
                 
                 # Check for video analysis manifests
-                if 'all_video_analyses' in locals() and all_video_analyses:
+                if all_video_analyses:
                     video_analyses = all_video_analyses
                 else:
                     missing_inputs.append("Video analysis manifests from analyze_video step")

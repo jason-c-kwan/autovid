@@ -1453,10 +1453,7 @@ def analyze_video(video_path: str,
             expected_count = len(expected_transitions) if expected_transitions else 0
             keynote_result = detect_keynote_scenes(
                 video_path=video_path,
-                expected_transitions=expected_count,
-                threshold=scene_threshold,
-                keynote_delay=keynote_delay,
-                presentation_mode=True
+                expected_transitions=expected_count
             )
             scene_transitions = keynote_result['scenes']
             logger.info(f"Using Keynote-optimized detection: {keynote_result['validation']['message']}")

@@ -87,7 +87,7 @@ def process_audio_chunk(chunk: Dict[str, Any], args: argparse.Namespace) -> Dict
     
     # Calculate MOS score
     mos_score = score_mos(wav_path)
-    mos_pass = mos_score >= args.mos_threshold
+    mos_pass = bool(mos_score >= args.mos_threshold)
     
     # Transcribe and calculate WER if enabled
     wer_score = 0.0
@@ -126,12 +126,12 @@ def process_audio_chunk(chunk: Dict[str, Any], args: argparse.Namespace) -> Dict
     duration_result = validate_duration(wav_path, args.min_chunk_duration, args.max_chunk_duration)
     
     # Additional pass/fail criteria
-    clipping_pass = not clipping_result.get("has_clipping", False) if args.detect_clipping else True
-    silence_pass = not silence_result.get("has_unexpected_silence", False) if args.detect_silence else True
-    duration_pass = duration_result.get("duration_valid", True)
+    clipping_pass = bool(not clipping_result.get("has_clipping", False)) if args.detect_clipping else True
+    silence_pass = bool(not silence_result.get("has_unexpected_silence", False)) if args.detect_silence else True
+    duration_pass = bool(duration_result.get("duration_valid", True))
     
     # Determine overall pass/fail
-    overall_pass = mos_pass and wer_pass and clipping_pass and silence_pass and duration_pass
+    overall_pass = bool(mos_pass and wer_pass and clipping_pass and silence_pass and duration_pass)
     
     qc_result = {
         "chunk_id": chunk_id,
@@ -197,8 +197,8 @@ def detect_clipping(wav_path: str, threshold: float = 0.95) -> Dict[str, Any]:
         clipping_percentage = (clipping_count / len(audio)) * 100
         
         return {
-            "has_clipping": clipping_count > 0,
-            "clipping_percentage": clipping_percentage,
+            "has_clipping": bool(clipping_count > 0),
+            "clipping_percentage": float(clipping_percentage),
             "clipping_samples": int(clipping_count),
             "total_samples": len(audio),
             "threshold_used": threshold
@@ -266,10 +266,10 @@ def detect_silence(wav_path: str, silence_threshold: float = -40, min_duration: 
         silence_percentage = (total_silence_duration / (len(audio) / sr)) * 100
         
         return {
-            "has_unexpected_silence": len(silent_periods) > 0,
+            "has_unexpected_silence": bool(len(silent_periods) > 0),
             "silent_periods": silent_periods,
-            "total_silence_duration": total_silence_duration,
-            "silence_percentage": silence_percentage,
+            "total_silence_duration": float(total_silence_duration),
+            "silence_percentage": float(silence_percentage),
             "threshold_used": silence_threshold
         }
     except Exception as e:

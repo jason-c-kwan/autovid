@@ -607,6 +607,7 @@ def run_rvc_convert(
     Raises:
         RuntimeError: If RVC conversion fails
     """
+    import json
     cmd = [
         sys.executable, "cli/rvc_convert.py",
         "--input", input_manifest,

@@ -135,7 +135,12 @@ def main():
                 sys.exit(1)
             try: # Check if the specific CUDA device is valid
                 # Attempting to get properties for a non-existent device should fail
-                torch.cuda.get_device_properties(args.device)
+                # Extract device index from "cuda:X" format
+                if ":" in args.device:
+                    device_index = int(args.device.split(":")[1])
+                else:
+                    device_index = 0
+                torch.cuda.get_device_properties(device_index)
             except (RuntimeError, AssertionError, IndexError) as e: # Catch typical errors for invalid device
                 print(f"Error: Invalid CUDA device '{args.device}'. PyTorch error: {e}", file=sys.stderr)
                 sys.exit(1)
