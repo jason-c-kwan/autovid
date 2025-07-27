@@ -7,6 +7,7 @@ import tempfile # Added for tts_run step
 from dotenv import load_dotenv
 import logging
 import sys # Added import
+from pathlib import Path
 from semantic_kernel import Kernel
 from semantic_kernel.memory.null_memory import NullMemory
 from semantic_kernel.connectors.ai.google.google_ai import GoogleAIChatCompletion as GoogleChatCompletion
@@ -419,6 +420,10 @@ def main():
                             step_id=step_id
                         )
                         
+                        # Add the manifest file path to the manifest dict for splice_audio step
+                        rvc_manifest_path = Path(rvc_output_dir) / "rvc_conversion_manifest.json"
+                        rvc_manifest["manifest_path"] = str(rvc_manifest_path)
+                        
                         all_rvc_manifests.append(rvc_manifest)
                         logging.info(f"RVC conversion {idx+1} completed successfully.")
                         
@@ -438,8 +443,12 @@ def main():
                 logging.info(f"Audio splicing output directory: {splice_output_dir}")
 
                 for idx, rvc_manifest in enumerate(all_rvc_manifests):
-                    # Get RVC manifest path - should be the actual file path where the manifest was saved
-                    rvc_manifest_path = os.path.join(rvc_output_dir, "rvc_conversion_manifest.json")
+                    # Get RVC manifest path from the manifest itself
+                    rvc_manifest_path = rvc_manifest.get("manifest_path")
+                    if not rvc_manifest_path:
+                        logging.warning(f"No manifest path in RVC manifest {idx+1}, skipping splice")
+                        continue
+                        
                     if not os.path.exists(rvc_manifest_path):
                         logging.warning(f"RVC manifest file not found at {rvc_manifest_path}, skipping splice")
                         continue

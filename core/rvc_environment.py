@@ -124,6 +124,37 @@ def download_pretrained_models() -> bool:
         return False
 
 
+def setup_rvc_csv_files() -> bool:
+    """Create required CSV files for RVC formant processing."""
+    try:
+        project_root = Path(__file__).parent.parent
+        rvc_dir = project_root / "third_party" / "Mangio-RVC-Fork"
+        csvdb_dir = rvc_dir / "csvdb"
+        
+        # Create csvdb directory if it doesn't exist
+        csvdb_dir.mkdir(exist_ok=True)
+        
+        # Create formanting.csv with default values (DoFormant=False, Quefrency=1.0, Timbre=1.0)
+        formanting_file = csvdb_dir / "formanting.csv"
+        if not formanting_file.exists():
+            with open(formanting_file, 'w') as f:
+                f.write("False,1.0,1.0\n")
+            print(f"Created {formanting_file}")
+        
+        # Create stop.csv with default value (False)
+        stop_file = csvdb_dir / "stop.csv"
+        if not stop_file.exists():
+            with open(stop_file, 'w') as f:
+                f.write("False\n")
+            print(f"Created {stop_file}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error creating RVC CSV files: {e}")
+        return False
+
+
 def setup_rvc_environment() -> bool:
     """Setup complete RVC environment (create env + download models)."""
     print("Setting up RVC environment...")
@@ -139,6 +170,11 @@ def setup_rvc_environment() -> bool:
     # Download pretrained models
     print("Checking pretrained models...")
     if not download_pretrained_models():
+        return False
+    
+    # Create required CSV files
+    print("Setting up RVC CSV files...")
+    if not setup_rvc_csv_files():
         return False
     
     print("RVC environment setup complete!")
