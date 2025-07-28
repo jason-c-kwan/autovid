@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import json
 from pathlib import Path
 import uuid
 from typing import Union, List, Dict, Any # Moved to top level
@@ -794,26 +795,44 @@ def sync_slides(video_path: str,
     import tempfile
     import os
     
-    # Build command
-    command = [sys.executable, 'cli/sync_slides.py', video_path, audio_path, output_path]
+    # Build command using sync subcommand
+    command = [
+        sys.executable, 'cli/sync_slides.py', 'sync',
+        '--video', video_path,
+        '--audio', audio_path,
+        '--output', output_path
+    ]
     
     # Add optional manifests
     if video_manifest:
-        command.extend(['--video-manifest', video_manifest])
+        command.extend(['--video-analysis', video_manifest])
     
     if audio_manifest:
         command.extend(['--audio-manifest', audio_manifest])
     
-    # Add config
-    command.extend(['--config', config_path])
+    # Need transcript manifest - try to find it based on video path
+    transcript_manifest = None
+    if video_manifest:
+        # Try to find corresponding transcript manifest
+        video_dir = os.path.dirname(video_manifest)
+        workspace_root = os.path.dirname(video_dir)
+        transcript_dir = os.path.join(workspace_root, "01_transcripts")
+        stem = os.path.splitext(os.path.basename(video_path))[0]
+        transcript_path = os.path.join(transcript_dir, f"{stem}_transcript_manifest.json")
+        if os.path.exists(transcript_path):
+            transcript_manifest = transcript_path
+            command.extend(['--transcript', transcript_manifest])
     
-    # Enable validation and create temporary manifest file
-    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json') as tmp_manifest:
-        tmp_manifest_path = tmp_manifest.name
+    # Create temporary sync plan file for output manifests
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json') as tmp_sync_plan:
+        tmp_sync_plan_path = tmp_sync_plan.name
+    
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json') as tmp_assembly_manifest:
+        tmp_assembly_manifest_path = tmp_assembly_manifest.name
     
     command.extend([
-        '--validate',
-        '--sync-manifest', tmp_manifest_path
+        '--sync-plan-output', tmp_sync_plan_path,
+        '--assembly-manifest', tmp_assembly_manifest_path
     ])
     
     try:
@@ -824,11 +843,11 @@ def sync_slides(video_path: str,
             check=True
         )
         
-        # Load the synchronization manifest
+        # Load the assembly manifest (primary output)
         sync_manifest = {}
-        if os.path.exists(tmp_manifest_path):
+        if os.path.exists(tmp_assembly_manifest_path):
             try:
-                with open(tmp_manifest_path, 'r') as f:
+                with open(tmp_assembly_manifest_path, 'r') as f:
                     sync_manifest = json.load(f)
             except json.JSONDecodeError as e:
                 # If manifest parsing fails, create a basic success response
@@ -850,20 +869,22 @@ def sync_slides(video_path: str,
                 }
             }
         
-        # Clean up temporary file
-        try:
-            os.unlink(tmp_manifest_path)
-        except OSError:
-            pass
+        # Clean up temporary files
+        for tmp_file in [tmp_sync_plan_path, tmp_assembly_manifest_path]:
+            try:
+                os.unlink(tmp_file)
+            except OSError:
+                pass
         
         return sync_manifest
         
     except subprocess.CalledProcessError as e:
-        # Clean up temporary file on error
-        try:
-            os.unlink(tmp_manifest_path)
-        except OSError:
-            pass
+        # Clean up temporary files on error
+        for tmp_file in [tmp_sync_plan_path, tmp_assembly_manifest_path]:
+            try:
+                os.unlink(tmp_file)
+            except OSError:
+                pass
         raise RuntimeError(f"Video synchronization failed: {e.stderr}") from e
 
 

@@ -488,7 +488,7 @@ def detect_keynote_scenes(
     """
     try:
         # Load configuration with overrides
-        config = config_loader.load_config()
+        config = config_loader.load_pipeline_config()
         video_config = config.get('video_analysis', {})
         
         # Apply overrides if provided
@@ -714,7 +714,7 @@ def save_analysis_manifest(
         Path to saved manifest file
     """
     if output_dir is None:
-        config = config_loader.load_config()
+        config = config_loader.load_pipeline_config()
         output_dir = config.get('video_analysis', {}).get('output_dir', 'workspace/video_analysis')
     
     os.makedirs(output_dir, exist_ok=True)

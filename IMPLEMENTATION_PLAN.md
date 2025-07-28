@@ -52,20 +52,20 @@ The AutoVid pipeline currently runs successfully through the RVC step, producing
 - [x] **Decision**: Choose Option B to maintain config consistency
 
 #### Task 2: Implement sync_slides Step Handler
-- [ ] Add `elif step_id == "sync_slides":` block in `autogen/conductor.py` after line 560
-- [ ] Implement input validation (splice manifests, video analyses, stems)
-- [ ] Create output directory `workspace/06_synchronized_videos`
-- [ ] Add loop to process each stem with corresponding manifests
-- [ ] Call `core.wrappers.sync_slides()` wrapper function
-- [ ] Add logging for step completion
+- [x] Add `elif step_id == "sync_slides":` block in `autogen/conductor.py` after line 560
+- [x] Implement input validation (splice manifests, video analyses, stems)
+- [x] Create output directory `workspace/06_synchronized_videos`
+- [x] Add loop to process each stem with corresponding manifests
+- [x] Call `core.wrappers.sync_slides()` wrapper function
+- [x] Add logging for step completion
 
 #### Task 3: Create sync_slides Wrapper Function
-- [ ] Add `sync_slides()` function to `core/wrappers.py`
-- [ ] Define function signature with all required parameters
-- [ ] Build command for `cli/sync_slides.py`
-- [ ] Add video analysis parameter handling
-- [ ] Implement subprocess call with error handling
-- [ ] Return structured result dictionary
+- [x] Add `sync_slides()` function to `core/wrappers.py`
+- [x] Define function signature with all required parameters
+- [x] Build command for `cli/sync_slides.py`
+- [x] Add video analysis parameter handling
+- [x] Implement subprocess call with error handling
+- [x] Return structured result dictionary
 
 #### Task 4: Fix RVC Manifest Path Issue
 - [x] Replace hardcoded path in `autogen/conductor.py` line 436
@@ -74,9 +74,9 @@ The AutoVid pipeline currently runs successfully through the RVC step, producing
 - [x] Test with actual RVC output structure
 
 #### Task 5: Remove Undefined make_srt Step
-- [ ] Remove `- id: make_srt` from `config/pipeline.yaml` line 307
-- [ ] Verify no other references to make_srt in pipeline
-- [ ] Document removal in commit message
+- [x] Remove `- id: make_srt` from `config/pipeline.yaml` line 307
+- [x] Verify no other references to make_srt in pipeline
+- [x] Document removal in commit message
 
 ### Phase 2: Testing and Validation
 

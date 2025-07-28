@@ -635,9 +635,12 @@ def main():
                                 audio_manifest_path = audio_manifests[idx]
                         
                         if not audio_manifest_path or not os.path.exists(audio_manifest_path):
-                            # Fallback: look for splice manifest by stem
+                            # Fallback: look for splice manifest by stem or generic name
                             splice_manifest_dir = os.path.join(workspace_root, "04_spliced_audio")
                             audio_manifest_path = os.path.join(splice_manifest_dir, f"{stem}_splice_manifest.json")
+                            # If stem-based doesn't exist, try generic filename
+                            if not os.path.exists(audio_manifest_path):
+                                audio_manifest_path = os.path.join(splice_manifest_dir, "splice_manifest.json")
                         
                         # Find corresponding video analysis manifest
                         video_manifest_path = None

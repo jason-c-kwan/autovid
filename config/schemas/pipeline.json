@@ -235,8 +235,7 @@
               "apply_rvc",
               "splice_audio",
               "analyze_video",
-              "sync_slides",
-              "make_srt"
+              "sync_slides"
             ]
           },
           "parameters": {
